@@ -7,13 +7,13 @@
     "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
     "repositoryUrl": "https://futo.org",
     "scriptUrl": "./SoundcloudScript.js",
-    "version": 13,
+    "version": 14,
     "iconUrl": "./soundcloud.png",
     "id": "5fb74e28-2fba-406a-9418-38af04f63c08",
     "scriptSignature": "",
     "scriptPublicKey": "",
     "packages": ["Http"],
     "allowEval": false,
-    "allowUrls": ["api-v2.soundcloud.com", "soundcloud.com", "a-v2.sndcdn.com", "m.soundcloud.com"],
+    "allowUrls": ["api-v2.soundcloud.com", "soundcloud.com", "a-v2.sndcdn.com", "m.soundcloud.com", "on.soundcloud.com"],
     "supportedClaimTypes": [17]
 }

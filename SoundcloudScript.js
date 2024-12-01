@@ -275,6 +275,11 @@ source.getPlaylist = function (url) {
  * @returns {HTTPResponse}
  */
 function callUrl(url, is_authenticated = false, use_mobile = false) {
+    
+    if(!use_mobile) {
+        url = removeMobilePrefix(url);
+    }
+    
     let headers = {
         'User-Agent': use_mobile ? USER_AGENT_MOBILE : USER_AGENT_DESKTOP,
         DNT: '1',
@@ -577,16 +582,24 @@ class ExtendableCommentPager extends CommentPager {
  * @returns { PlatformChannel }
  */
 function soundcloudUserToPlatformChannel(scu) {
+    if (!scu || typeof scu !== 'object') {
+        throw new ScriptException('Invalid SoundCloud user object');
+    }
+
+    const visuals = scu.visuals?.visuals || [];
+    const banner = visuals?.[0]?.visual_url || '';
+    const links = visuals.map(v => v.link).filter(Boolean);
+
     return new PlatformChannel({
         id: new PlatformID(PLATFORM, scu.id.toString(), config.id, PLATFORM_CLAIMTYPE),
         name: scu.username,
         thumbnail: scu.avatar_url,
-        banner: scu?.visuals?.visuals.length > 0 ? scu.visuals.visuals[0].visual_url : '',
-        subscribers: scu.followers_count,
+        banner,
+        subscribers: scu.followers_count || 0,
         description: scu.description,
         url: scu.permalink_url,
-        links: scu.visuals ? scu.visuals.visuals.map((v) => v.link) : [],
-    })
+        links,
+    });
 }
 
 /**
@@ -611,6 +624,16 @@ function soundcloudTrackToPlatformVideo(sct) {
         url: sct.permalink_url,
         isLive: false,
     })
+}
+
+/**
+ * Replace the "m." prefix in a SoundCloud URL with an empty string.
+ * 
+ * @param {string} url - The SoundCloud URL to modify.
+ * @returns {string} - The modified URL without the "m." prefix.
+ */
+function removeMobilePrefix(url) {
+    return url.trim().replace("https://m.", "https://");
 }
 
 console.log('LOADED')
