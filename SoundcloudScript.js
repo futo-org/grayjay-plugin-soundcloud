@@ -275,6 +275,11 @@ source.getPlaylist = function (url) {
  * @returns {HTTPResponse}
  */
 function callUrl(url, is_authenticated = false, use_mobile = false) {
+    
+    if(!use_mobile) {
+        url = removeMobilePrefix(url);
+    }
+    
     let headers = {
         'User-Agent': use_mobile ? USER_AGENT_MOBILE : USER_AGENT_DESKTOP,
         DNT: '1',
@@ -611,6 +616,16 @@ function soundcloudTrackToPlatformVideo(sct) {
         url: sct.permalink_url,
         isLive: false,
     })
+}
+
+/**
+ * Replace the "m." prefix in a SoundCloud URL with an empty string.
+ * 
+ * @param {string} url - The SoundCloud URL to modify.
+ * @returns {string} - The modified URL without the "m." prefix.
+ */
+function removeMobilePrefix(url) {
+    return url.trim().replace("https://m.", "https://");
 }
 
 console.log('LOADED')
