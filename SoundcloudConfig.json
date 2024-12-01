@@ -14,6 +14,6 @@
     "scriptPublicKey": "",
     "packages": ["Http"],
     "allowEval": false,
-    "allowUrls": ["api-v2.soundcloud.com", "soundcloud.com", "a-v2.sndcdn.com", "m.soundcloud.com"],
+    "allowUrls": ["api-v2.soundcloud.com", "soundcloud.com", "a-v2.sndcdn.com", "m.soundcloud.com", "on.soundcloud.com"],
     "supportedClaimTypes": [17]
 }
