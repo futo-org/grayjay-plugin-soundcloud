@@ -582,16 +582,24 @@ class ExtendableCommentPager extends CommentPager {
  * @returns { PlatformChannel }
  */
 function soundcloudUserToPlatformChannel(scu) {
+    if (!scu || typeof scu !== 'object') {
+        throw new ScriptException('Invalid SoundCloud user object');
+    }
+
+    const visuals = scu.visuals?.visuals || [];
+    const banner = visuals?.[0]?.visual_url || '';
+    const links = visuals.map(v => v.link).filter(Boolean);
+
     return new PlatformChannel({
         id: new PlatformID(PLATFORM, scu.id.toString(), config.id, PLATFORM_CLAIMTYPE),
         name: scu.username,
         thumbnail: scu.avatar_url,
-        banner: scu?.visuals?.visuals.length > 0 ? scu.visuals.visuals[0].visual_url : '',
-        subscribers: scu.followers_count,
+        banner,
+        subscribers: scu.followers_count || 0,
         description: scu.description,
         url: scu.permalink_url,
-        links: scu.visuals ? scu.visuals.visuals.map((v) => v.link) : [],
-    })
+        links,
+    });
 }
 
 /**
