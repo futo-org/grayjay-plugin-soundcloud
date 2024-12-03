@@ -157,7 +157,8 @@ source.getContentDetails = function (url) {
 
     sct.video = new UnMuxVideoSourceDescriptor([], sources)
     sct.description = data.description
-    sct.rating = new RatingLikes(data.likes_count)
+    const likesCount = Number.isFinite(data?.likes_count) ? data.likes_count : 0;
+    sct.rating = new RatingLikes(likesCount);
 
     return new PlatformVideoDetails(sct)
 }
