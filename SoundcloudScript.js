@@ -347,9 +347,14 @@ function getHomepageContent(context) {
     /** @type {import("./types").SoundcloudTrack[]} */
     const tracks = json['collection']
 
-    return tracks.map((track) => {
+    const results = ensureUniqueByProperty(tracks, 'id')
+    .map((track) => {
         return soundcloudTrackToPlatformVideo(track)
-    })
+    });
+
+    const hasMore = json?.['next_href'] !== null
+
+    return { results, hasMore }
 }
 
 //* Pagers
@@ -358,13 +363,15 @@ class QueryPager extends VideoPager {
      * @param {import("./types.d.ts").HomeContext} context the query params
      */
     constructor(context) {
-        const results = getHomepageContent(context)
-        super(results, results.length >= context.page_size, context)
+        const data = getHomepageContent(context);
+        super(data.results, data.hasMore, context)
     }
 
     nextPage() {
         this.context.page = this.context.page + 1
-        this.results = getHomepageContent(this.context)
+        const data = getHomepageContent(this.context)
+        this.results = data.results;
+        this.hasMore = data.hasMore;
         return this
     }
 }
@@ -636,5 +643,24 @@ function soundcloudTrackToPlatformVideo(sct) {
 function removeMobilePrefix(url) {
     return url.trim().replace("https://m.", "https://");
 }
+
+/**
+ * Currently the trending pages has some duplicates, this function ensures that the array is unique based on the specified property.
+ * Ensures that each item in the array is unique based on the specified property.
+ * @param {Array} array - The array of objects to process.
+ * @param {string} property - The property to use for uniqueness.
+ * @returns {Array} - A new array with unique items based on the specified property.
+ */
+function ensureUniqueByProperty(array, property) {
+    const seen = new Set();
+    return array.filter(item => {
+        if (item[property] && !seen.has(item[property])) {
+            seen.add(item[property]);
+            return true;
+        }
+        return false;
+    });
+}
+
 
 console.log('LOADED')
