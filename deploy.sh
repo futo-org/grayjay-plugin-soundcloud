@@ -1,25 +1,50 @@
 #!/bin/sh
 DOCUMENT_ROOT=/var/www/sources
 
+# Use environment variable to determine deployment type
+PRE_RELEASE=${PRE_RELEASE:-false}  # Default to false if not set
+
+# Determine deployment directory
+if [ "$PRE_RELEASE" = "true" ]; then
+    RELATIVE_PATH="pre-release/Soundcloud"
+else
+    RELATIVE_PATH="Soundcloud"
+fi
+
+DEPLOY_DIR="$DOCUMENT_ROOT/$RELATIVE_PATH"
+PLUGIN_URL_ROOT="https://plugins.grayjay.app/$RELATIVE_PATH"
+SOURCE_URL="$PLUGIN_URL_ROOT/SoundcloudConfig.json"
+
 # Take site offline
 echo "Taking site offline..."
 touch $DOCUMENT_ROOT/maintenance.file
 
 # Swap over the content
 echo "Deploying content..."
-mkdir -p $DOCUMENT_ROOT/Soundcloud
-cp soundcloud.png $DOCUMENT_ROOT/Soundcloud
-cp SoundcloudConfig.json $DOCUMENT_ROOT/Soundcloud
-cp SoundcloudScript.js $DOCUMENT_ROOT/Soundcloud
-sh sign.sh $DOCUMENT_ROOT/Soundcloud/SoundcloudScript.js $DOCUMENT_ROOT/Soundcloud/SoundcloudConfig.json
+mkdir -p "$DEPLOY_DIR"
+cp soundcloud.png "$DEPLOY_DIR"
+cp SoundcloudConfig.json "$DEPLOY_DIR"
+cp SoundcloudScript.js "$DEPLOY_DIR"
+
+# Update the sourceUrl in SoundcloudConfig.json
+echo "Updating sourceUrl in SoundcloudConfig.json..."
+jq --arg sourceUrl "$SOURCE_URL" '.sourceUrl = $sourceUrl' "$DEPLOY_DIR/SoundcloudConfig.json" > "$DEPLOY_DIR/SoundcloudConfig_temp.json"
+if [ $? -eq 0 ]; then
+    mv "$DEPLOY_DIR/SoundcloudConfig_temp.json" "$DEPLOY_DIR/SoundcloudConfig.json"
+else
+    echo "Failed to update SoundcloudConfig.json" >&2
+    exit 1
+fi
+
+sh sign.sh "$DEPLOY_DIR/SoundcloudScript.js" "$DEPLOY_DIR/SoundcloudConfig.json"
 
 # Notify Cloudflare to wipe the CDN cache
 echo "Purging Cloudflare cache for zone $CLOUDFLARE_ZONE_ID..."
 curl -X POST "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache" \
      -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
      -H "Content-Type: application/json" \
-     --data '{"files":["https://plugins.grayjay.app/Soundcloud/soundcloud.png", "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json", "https://plugins.grayjay.app/Soundcloud/SoundcloudScript.js"]}'
+     --data '{"files":["'"$PLUGIN_URL_ROOT/soundcloud.png"'", "'"$PLUGIN_URL_ROOT/SoundcloudConfig.json"'", "'"$PLUGIN_URL_ROOT/SoundcloudScript.js"'"]}'
 
 # Take site back online
 echo "Bringing site back online..."
-rm $DOCUMENT_ROOT/maintenance.file
+rm "$DOCUMENT_ROOT/maintenance.file"
