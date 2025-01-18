@@ -12,8 +12,8 @@ const URL_BASE = "https://soundcloud.com";
 let CLIENT_ID = 'iZIs9mchVcX5lhVRyQGGAYlNPVldzAoX' // correct as of June 2023, enable changes this to get the latest
 const URL_ADDITIVE = `&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=${APP_LOCALE}`
 
-const REGEX_PLAYLISTS_CHANNEL = /^https?:\/\/(www\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/(likes|popular-tracks|tracks|reposts|sets\/[a-zA-Z0-9_-]+)$/;
-const REGEX_CHANNEL = /^https?:\/\/(www\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/?$/;
+const REGEX_PLAYLISTS_CHANNEL = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/(likes|popular-tracks|tracks|reposts|sets\/[a-zA-Z0-9_-]+)$/;
+const REGEX_CHANNEL = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/?$/;
 
 const systemPlaylistsMaps = {
     likes: {
@@ -105,7 +105,7 @@ source.searchChannels = function (query) {
 }
 source.isChannelUrl = function (url) {
     // see if it matches https://soundcloud.com/nfrealmusic
-    return /soundcloud\.com\/[a-zA-Z0-9-_]+\/?/.test(url)
+    return !source.isPlaylistUrl(url) && /soundcloud\.com\/[a-zA-Z0-9-_]+\/?/.test(url)
 }
 source.getChannel = function (url) {
 
@@ -260,7 +260,7 @@ source.getChannelTemplateByClaimMap = () => {
 
 source.isContentDetailsUrl = function (url) {
     // https://soundcloud.com/toosii2x/toosii-favorite-song
-    return /soundcloud\.com\/[a-zA-Z0-9-_]+\/[a-zA-Z0-9-_]+/.test(url)
+    return !source.isPlaylistUrl(url) && /soundcloud\.com\/[a-zA-Z0-9-_]+\/[a-zA-Z0-9-_]+/.test(url)
 }
 source.getContentDetails = function (url) {
     const resp = callUrl(url)
@@ -383,7 +383,7 @@ source.getPlaylist = function (url) {
     if(isSoundCloudDefaultPlaylist(url)){
         return standardPlaylistPager(url);
     }
-
+    
     const resp = callUrl(url, true)
 
     const html = resp.body
@@ -887,7 +887,7 @@ function isSoundCloudChannelPlaylistUrl(url) {
 }
 
 function isSoundCloudDefaultPlaylist(url) {
-    const defaultPlaylistPatternRegex = /^https?:\/\/(www\.)?soundcloud\.com\/[a-zA-Z0-9_-]+\/(likes|popular-tracks|toptracks|tracks|reposts)$/;
+    const defaultPlaylistPatternRegex = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/[a-zA-Z0-9_-]+\/(likes|popular-tracks|toptracks|tracks|reposts)$/;
     return defaultPlaylistPatternRegex.test(url);
 }
 
@@ -985,7 +985,7 @@ function standardPlaylistPager(url){
 function extractSoundCloudDetails(url) {
     if (!url) return null;
 
-    const match = url.match(/^https?:\/\/(www\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)\/?$/);
+    const match = url.match(/^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)\/?$/);
     if (match) {
         return {
             userId: match[2], // Extracted user/artist name
