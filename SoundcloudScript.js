@@ -908,7 +908,7 @@ function standardPlaylistPager(url){
     const apiBasePath = info?.apiBasePath ?? 'https://api-v2.soundcloud.com/users';
 
     let withNext = [
-        `${apiBasePath}/${channel.id.value}/${apiPath}?client_id=${CLIENT_ID}&limit=10&offset=0&linked_partitioning=1&app_version=1735826482&app_locale=en`
+        `${apiBasePath}/${channel.id.value}/${apiPath}?client_id=${CLIENT_ID}&limit=20&offset=0&linked_partitioning=1&app_version=1735826482&app_locale=en`
     ]
     
     class ChannelPlaylistsPager extends VideoPager {
@@ -924,6 +924,7 @@ function standardPlaylistPager(url){
           nextPage() {
               
             let withNext = this.context.withNext ?? [];
+            let seen = this.context.seen ?? [];
             
             let all = this.results ?? [];
 
@@ -951,7 +952,9 @@ function standardPlaylistPager(url){
                     const currentCollection = body.collection.filter(c => c.track || c.kind === 'track').map(c => soundcloudTrackToPlatformVideo(c.track ?? c));
                        
         
-                    all = [...all, ...currentCollection]
+                    all = [...all, ...currentCollection].filter(a => seen.indexOf(a.id.value) === -1);
+
+                    seen = [...seen, ...all.map(a => a.id.value)];
                     
                 }
                 
@@ -959,7 +962,7 @@ function standardPlaylistPager(url){
         
             const hasMore = !!withNext.length;
             
-            return new ChannelPlaylistsPager({results: all, hasMore, context: { withNext }});
+            return new ChannelPlaylistsPager({results: all, hasMore, context: { withNext, seen }});
           }
     }
 
