@@ -3,7 +3,7 @@ const API_URL = 'https://api-v2.soundcloud.com/'
 const APP_LOCALE = 'en'
 const PLATFORM = 'Soundcloud'
 const PLATFORM_CLAIMTYPE = 16;
-const SOUNDCLOUD_APP_VERSION = '1686222762'
+const SOUNDCLOUD_APP_VERSION = '1735826482'
 const USER_AGENT_DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 const USER_AGENT_MOBILE = 'Mozilla/5.0 (Linux; Android 10; Pixel 6a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 
@@ -12,12 +12,54 @@ const URL_BASE = "https://soundcloud.com";
 let CLIENT_ID = 'iZIs9mchVcX5lhVRyQGGAYlNPVldzAoX' // correct as of June 2023, enable changes this to get the latest
 const URL_ADDITIVE = `&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=${APP_LOCALE}`
 
-var config = {}
+const REGEX_CHANNEL_PLAYLISTS = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/sets\/[a-zA-Z0-9_-]+(\?[^#]*)?$/;
+const REGEX_SYSTEM_PLAYLISTS = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/[a-zA-Z0-9_-]+\/(likes|popular-tracks|toptracks|tracks|reposts)$/
+const REGEX_CHANNEL = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/?$/;
+const REGEX_TRACK = /(?:https?:\/\/)?(?:www\.|m\.)?soundcloud\.com\/[a-zA-Z0-9-_]+\/[a-zA-Z0-9-_]+(?:\?[^\s#]*)?/;
+
+const systemPlaylistsMaps = {
+    likes: {
+        path: 'likes',
+        apiPath: 'likes',
+        playlistTitle: 'Likes'
+    },
+    tracks: {
+        path: 'tracks',
+        apiPath: 'tracks',
+        playlistTitle: 'Tracks'
+    },
+    "popular-tracks": {
+        path: "popular-tracks",
+        apiPath: 'toptracks',
+        playlistTitle: 'Popular Tracks'
+    },
+    "reposts": {
+        path: "reposts",
+        apiPath: 'reposts',
+        apiBasePath: 'https://api-v2.soundcloud.com/stream/users',
+        playlistTitle: 'Reposts'
+    },
+}
+
+let config = {}
+
+let state = {
+    channel: {}
+}
 
 //* Source
-source.enable = function (conf) {
+source.enable = function (conf, settings, saveStateStr) {
     config = conf ?? {}
     CLIENT_ID = getClientId()
+
+    try {
+        if (saveStateStr) {
+            state = JSON.parse(saveStateStr);
+        }
+    } catch (ex) {
+        log('Failed to parse saveState:' + ex);
+    }
+
     return CLIENT_ID
 }
 source.getHome = function () {
@@ -65,9 +107,14 @@ source.searchChannels = function (query) {
 }
 source.isChannelUrl = function (url) {
     // see if it matches https://soundcloud.com/nfrealmusic
-    return /soundcloud\.com\/[a-zA-Z0-9-_]+\/?/.test(url)
+    return !source.isPlaylistUrl(url) && REGEX_CHANNEL.test(url)
 }
 source.getChannel = function (url) {
+
+    if(state.channel[url]) {
+        return state.channel[url];
+    }
+
     const resp = callUrl(url)
 
     const html = resp.body
@@ -82,7 +129,8 @@ source.getChannel = function (url) {
 
     for (let object of json) {
         if (object.hydratable === 'user') {
-            return soundcloudUserToPlatformChannel(object.data)
+            state.channel[url] = soundcloudUserToPlatformChannel(object.data);
+            return state.channel[url];
         }
     }
 
@@ -90,6 +138,114 @@ source.getChannel = function (url) {
 }
 source.getChannelContents = function (url) {
     return new ChannelVideoPager({ url: url, page_size: 20, offset_date: 0 })
+}
+
+source.getChannelPlaylists = (url) => {
+
+    const channelSlug = extractSoundCloudId(url);
+    
+    const channel = source.getChannel(`${URL_BASE}/${channelSlug}`);
+
+    const author =  new PlatformAuthorLink(
+        new PlatformID(PLATFORM,channel.id.value.toString(),config.id,PLATFORM_CLAIMTYPE),
+        channel.name,
+        channel.url,
+        channel.thumbnail,
+    );
+
+    class ChannelPlaylistsPager extends ContentPager {
+        constructor({
+            results = [],
+            hasMore = true,
+            context = {withNext: []},
+          }) {
+            
+            super(results, hasMore, context);
+          }
+
+          nextPage() {
+              
+            let withNext = this.context.withNext ?? [];
+            let firstPage = this.context.firstPage ?? false;
+            
+            let all = firstPage ? (this.results ?? []) : [];
+
+            let batch = http.batch();
+            
+            withNext.forEach(url => {
+                batch.GET(url, {});
+            });
+
+            const responses = batch.execute();
+        
+            withNext = [];
+        
+            for(var ct = 0; ct < responses.length; ct++) {
+                const res = responses[ct];
+                
+                if(res.isOk) {
+                    const body = JSON.parse(res.body);
+                    
+                    if(body.next_href) {
+                        withNext.push(`${body.next_href}$?client_id=${CLIENT_ID}`);
+                    }
+        
+                    const currentCollection = body.collection.map(v => {
+                        
+                        return new PlatformPlaylist({
+                            id: new PlatformID(PLATFORM, v.id.toString(), config.id, PLATFORM_CLAIMTYPE),
+                            author: author,
+                            name: v.title,
+                            thumbnail: v.artwork_url,
+                            videoCount: v?.track_count ?? -1,
+                            datetime: dateToUnixSeconds(v.display_date),
+                            url: v.permalink_url,
+                          })
+                    });            
+        
+                    all = [...all, ...currentCollection]
+                    
+                }
+                
+            }
+        
+            const hasMore = !!withNext.length;
+            
+            return new ChannelPlaylistsPager({results: all, hasMore, context: { withNext }});
+          }
+    }
+
+    let withNext = [
+        `albums`,
+        `playlists_without_albums`
+    ].map((path) => `https://api-v2.soundcloud.com/users/${channel.id.value}/${path}?client_id=${CLIENT_ID}&limit=10&offset=0&linked_partitioning=1&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=en`);
+
+// system playlists
+    let results = [
+        'likes',
+        'popular-tracks',
+        'tracks',
+        'reposts'
+    ].map(path => {
+
+        const info = systemPlaylistsMaps[path];
+
+        const name = info?.playlistTitle ?? path;
+        const playlistPath = info?.path ?? path;
+
+        return new PlatformPlaylist({
+            id: new PlatformID(PLATFORM, '', config.id, PLATFORM_CLAIMTYPE),
+            author: author,
+            name: name,
+            thumbnail: channel.banner || channel.thumbnail || '',
+            videoCount: -1,
+            // datetime: dateToUnixSeconds(v.display_date),
+            url: `https://soundcloud.com/${channelSlug}/${playlistPath}`,
+          })
+    })
+
+    return new ChannelPlaylistsPager({ results, context: { withNext, firstPage: true } }).nextPage();
+
 }
 
 
@@ -106,7 +262,7 @@ source.getChannelTemplateByClaimMap = () => {
 
 source.isContentDetailsUrl = function (url) {
     // https://soundcloud.com/toosii2x/toosii-favorite-song
-    return /soundcloud\.com\/[a-zA-Z0-9-_]+\/[a-zA-Z0-9-_]+/.test(url)
+    return !source.isPlaylistUrl(url) && REGEX_TRACK.test(url)
 }
 source.getContentDetails = function (url) {
     const resp = callUrl(url)
@@ -222,9 +378,14 @@ source.getUserPlaylists = function () {
     })
 }
 source.isPlaylistUrl = function (url) {
-    return /soundcloud\.com\/[a-zA-Z0-9-_]+\/sets\/[a-zA-Z0-9-_]+/.test(url)
+    return isSoundCloudChannelPlaylistUrl(url)
 }
-source.getPlaylist = function (url) {
+source.getPlaylist = function (url) {  
+
+    if(isSoundCloudSystemPlaylist(url)){
+        return standardPlaylistPager(url);
+    }
+    
     const resp = callUrl(url, true)
 
     const html = resp.body
@@ -237,19 +398,54 @@ source.getPlaylist = function (url) {
 
     /** @type {SCHydration[]} */
     const json = JSON.parse(matched[1])
-
+    
     /** @type {number[]} */
     let ids = []
+    let playlistTitle = '';
+    let playlistId = '';
 
     for (let object of json) {
         if (object.hydratable === 'systemPlaylist') {
-            ids = object.data.tracks.map((track) => track.id)
+            ids = object.data.tracks.map((track) => track.id) 
             break
         } else if (object.hydratable === 'playlist') {
             ids = object.data.tracks.map((track) => track.id)
+            playlistTitle = object.data.title
+            playlistId = object.data.id.toString()     
             break
         }
     }
+
+    let user = json.find(object => object.hydratable === 'user');
+    
+    let author;
+
+    if(user) {
+        author =  new PlatformAuthorLink(
+            new PlatformID(
+              PLATFORM,
+              user.data.id.toString(),
+              config.id,
+              PLATFORM_CLAIMTYPE,
+            ),
+            user.data.username,
+            user.data.permalink_url,
+            user.data.avatar_url,
+          );
+    } else {
+        author =  new PlatformAuthorLink(
+            new PlatformID(
+                PLATFORM,
+                '',
+                config.id,
+                PLATFORM_CLAIMTYPE,
+            ),
+            '',
+            '',
+            '',
+          );
+    }
+    
     /** @type {import("./types.d.ts").SoundcloudTrack[]} */
     let tracks = []
 
@@ -263,9 +459,23 @@ source.getPlaylist = function (url) {
 
         tracks = tracks.concat(found_tracks)
     }
+    
+    const content = tracks.map(soundcloudTrackToPlatformVideo);
+    
+    return new PlatformPlaylistDetails({
+        url: url,
+        id: new PlatformID(PLATFORM, playlistId, config.id),
+        author: author,
+        name: playlistTitle,
+        videoCount: content?.length ?? 0,
+        contents: new VideoPager(content)
+    });
 
-    return tracks.map((track) => track.permalink_url)
 }
+
+source.saveState = () => {
+    return JSON.stringify(state);
+};
 
 //* Internals
 /**
@@ -662,5 +872,139 @@ function ensureUniqueByProperty(array, property) {
     });
 }
 
+
+function extractSoundCloudId(url) {
+    if (!url) return null;
+
+    const match = url.match(REGEX_CHANNEL);
+    if (match) {
+        return match[2]; // The second capturing group contains the SoundCloud ID
+    }
+
+    return null; // Return null if no match
+}
+
+function isSoundCloudChannelPlaylistUrl(url) {
+    return REGEX_CHANNEL_PLAYLISTS.test(url) || REGEX_SYSTEM_PLAYLISTS.test(url);
+}
+
+function isSoundCloudSystemPlaylist(url) {
+    return REGEX_SYSTEM_PLAYLISTS.test(url);
+}
+
+function standardPlaylistPager(url){
+    
+    const urlDetails = extractSoundCloudDetails(url);
+    
+    const channelSlug = urlDetails.userId;
+    const playlist = urlDetails.trackId;
+    
+    const channel = source.getChannel(`${URL_BASE}/${channelSlug}`);
+    
+    const info = systemPlaylistsMaps[playlist];
+
+    const apiPath = info?.apiPath ?? playlist;
+    const playlistTitle =  info?.playlistTitle ?? playlist;
+    const apiBasePath = info?.apiBasePath ?? 'https://api-v2.soundcloud.com/users';
+
+    let withNext = [
+        `${apiBasePath}/${channel.id.value}/${apiPath}?client_id=${CLIENT_ID}&limit=20&offset=0&linked_partitioning=1&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=en`
+    ]
+    
+    class ChannelPlaylistsPager extends VideoPager {
+        constructor({
+            results,
+            hasMore,
+            context,
+          }) {
+            
+            super(results, hasMore, context);
+          }
+
+          nextPage() {
+              
+            let withNext = this.context.withNext ?? [];
+            let seen = this.context.seen ?? [];
+            
+            let all = this.results ?? [];
+
+            let batch = http.batch();
+            
+            withNext.forEach(url => {
+                batch.GET(url, {});
+            });
+
+            const responses = batch.execute();
+        
+            withNext = [];
+            
+            for(var ct = 0; ct < responses.length; ct++) {
+                const res = responses[ct];
+                
+                if(res.isOk) {
+                    
+                    const body = JSON.parse(res.body);
+                     
+                    if(body.next_href) {
+                        withNext.push(`${body.next_href}&client_id=${CLIENT_ID}`);
+                    }
+        
+                    const currentCollection = body.collection.filter(c => c.track || c.kind === 'track').map(c => soundcloudTrackToPlatformVideo(c.track ?? c));
+                       
+                    all = [...all, ...currentCollection].filter(a => seen.indexOf(a.id.value) === -1);
+
+                    seen = [...seen, ...all.map(a => a.id.value)];
+                    
+                }
+                
+            }
+        
+            const hasMore = !!withNext.length;
+            
+            return new ChannelPlaylistsPager({results: all, hasMore, context: { withNext, seen }});
+          }
+    }
+
+    const author =  new PlatformAuthorLink(
+        new PlatformID(PLATFORM,channel.id.value.toString(),config.id,PLATFORM_CLAIMTYPE),
+        channel.name,
+        channel.url,
+        channel.thumbnail,
+    );
+    
+    let contentPager = new ChannelPlaylistsPager({ context: { withNext } }).nextPage();
+        
+    return new PlatformPlaylistDetails({
+        url: url,
+        id: new PlatformID(PLATFORM, '', config.id),
+        author: author,
+        name: playlistTitle,
+        // thumbnail: "",
+        videoCount: -1,
+        contents: contentPager
+    });
+}
+
+function extractSoundCloudDetails(url) {
+    if (!url) return null;
+
+    const match = url.match(/^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)\/?$/);
+    if (match) {
+        return {
+            userId: match[2], // Extracted user/artist name
+            trackId: match[3] // Extracted track identifier
+        };
+    }
+
+    return null; // Return null if the URL doesn't match the expected pattern
+}
+
+function dateToUnixSeconds(date) {
+    if (!date) {
+      return 0;
+    }
+    
+    return Math.round(Date.parse(date) / 1000);
+}
 
 console.log('LOADED')
