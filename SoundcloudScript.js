@@ -197,7 +197,7 @@ source.getChannelPlaylists = (url) => {
                             author: author,
                             name: v.title,
                             thumbnail: v.artwork_url,
-                            videoCount: v?.track_count ?? 0,
+                            videoCount: v?.track_count ?? -1,
                             datetime: dateToUnixSeconds(v.display_date),
                             url: v.permalink_url,
                           })
@@ -238,7 +238,7 @@ source.getChannelPlaylists = (url) => {
             author: author,
             name: name,
             thumbnail: channel.banner || channel.thumbnail || '',
-            videoCount: 0,
+            videoCount: -1,
             // datetime: dateToUnixSeconds(v.display_date),
             url: `https://soundcloud.com/${channelSlug}/${playlistPath}`,
           })
@@ -908,7 +908,7 @@ function standardPlaylistPager(url){
     const apiBasePath = info?.apiBasePath ?? 'https://api-v2.soundcloud.com/users';
 
     let withNext = [
-        `${apiBasePath}/${channel.id.value}/${apiPath}?client_id=${CLIENT_ID}&limit=20&offset=0&linked_partitioning=1&app_version=1735826482&app_locale=en`
+        `${apiBasePath}/${channel.id.value}/${apiPath}?client_id=${CLIENT_ID}&limit=20&offset=0&linked_partitioning=1&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=en`
     ]
     
     class ChannelPlaylistsPager extends VideoPager {
@@ -951,7 +951,6 @@ function standardPlaylistPager(url){
         
                     const currentCollection = body.collection.filter(c => c.track || c.kind === 'track').map(c => soundcloudTrackToPlatformVideo(c.track ?? c));
                        
-        
                     all = [...all, ...currentCollection].filter(a => seen.indexOf(a.id.value) === -1);
 
                     seen = [...seen, ...all.map(a => a.id.value)];
@@ -981,7 +980,7 @@ function standardPlaylistPager(url){
         author: author,
         name: playlistTitle,
         // thumbnail: "",
-        videoCount: 0,
+        videoCount: -1,
         contents: contentPager
     });
 }
