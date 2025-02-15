@@ -15,5 +15,14 @@
     "packages": ["Http"],
     "allowEval": false,
     "allowUrls": ["api-v2.soundcloud.com", "soundcloud.com", "a-v2.sndcdn.com", "m.soundcloud.com", "on.soundcloud.com"],
-    "supportedClaimTypes": [17]
+    "supportedClaimTypes": [17],
+    "settings": [
+		{
+			"variable": "hidePremiumContent",
+			"name": "Hide premium content",
+			"description": "Hides premium content you do not have access",
+			"type": "Boolean",
+			"default": "true"
+		}
+	]
 }

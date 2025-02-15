@@ -47,9 +47,22 @@ let state = {
     channel: {}
 }
 
+let _settings = {
+    hidePremiumContent: true
+}
+
 //* Source
 source.enable = function (conf, settings, saveStateStr) {
     config = conf ?? {}
+    _settings = settings ?? {}
+
+    if(IS_TESTING) {
+        _settings = {
+            hidePremiumContent: true
+        }
+    }
+
+    
     CLIENT_ID = getClientId()
 
     try {
@@ -590,67 +603,119 @@ class SearchPagerVideos extends VideoPager {
      * @param {import("./types").SearchContext} context the query params
      */
     constructor(context) {
-        if (context.get_all) {
-            // https://api-v2.soundcloud.com/search?q=search%20and%20destroy%20drake&client_id=VDJ3iu7ZYtUMibDTM2XcUbRijDa3L6ug&limit=20&offset=0&linked_partitioning=1&app_version=1683798046&app_locale=en
-            const limit = context.page_size
-            const offset = (context.page - 1) * limit
+        const resultsData = SearchPagerVideos.fetchAndProcessResults(context); // Fetch and process before calling `super`
 
-            const url = `${API_URL}search?q=${encodeURIComponent(
-                context.q
-            )}&client_id=${CLIENT_ID}&limit=${limit}&offset=${offset}&linked_partitioning=1${URL_ADDITIVE}`
-
-            const resp = callUrl(url)
-
-            /** @type {import("./types").AnySearchResponse} */
-            const json = JSON.parse(resp.body)
-
-            if (json['collection'] === undefined) {
-                if(IS_TESTING)
-                    console.log('Soundcloud search response: ' + resp.body)
-                throw new ScriptException('Could not find collection')
-            }
-
-            /** @type {(PlatformVideo | PlatformChannel | PlatformPlaylist)[]} */
-            const results = []
-
-            for (const result of json['collection']) {
-                if (result['kind'] === 'track') {
-                    results.push(soundcloudTrackToPlatformVideo(result))
-                } else if (result['kind'] === 'user') {
-                    continue
-                    results.push(soundcloudUserToPlatformChannel(result))
-                } else if (result['kind'] === 'playlist' || result['kind'] === 'album') {
-                    // results.push(soundcloudPlaylistToPlatformPlaylist(result))
-                } else {
-                    if(IS_TESTING)
-                        console.log('Soundcloud search result: ' + JSON.stringify(result))
-                    throw new ScriptException('Unknown kind: ' + result['kind'])
-                }
-            }
-
-            super(results, results.length >= context.page_size, context)
-        } else {
-            const limit = context.page_size
-            const offset = (context.page - 1) * limit
-            const url = `${API_URL}search/tracks?limit=${limit}&offset=${offset}&q=${context.q}&client_id=${CLIENT_ID}${URL_ADDITIVE}`
-
-            const resp = callUrl(url)
-
-            /** @type {SearchResponse} */
-            const json = JSON.parse(resp.body)
-
-            /** @type {SoundcloudTrack[]} */
-            const tracks = json['collection']
-
-            const results = tracks.map((track) => soundcloudTrackToPlatformVideo(track))
-
-            super(results, results.length >= context.page_size, context)
-        }
+        // Call the parent constructor with results, hasMore flag, and context
+        super(resultsData.results, resultsData.hasMore, context);
     }
 
+    /**
+     * Fetches and processes the search results
+     * @param {object} context - The search context
+     * @returns {object} - An object containing `results` and `hasMore`
+     */
+    static fetchAndProcessResults(context) {
+        const limit = context.page_size;
+        const offset = (context.page - 1) * limit;
+        let endpoint, queryKey;
+
+        if (context.get_all) {
+            // https://api-v2.soundcloud.com/search?q=search%20and%20destroy%20drake&client_id=VDJ3iu7ZYtUMibDTM2XcUbRijDa3L6ug&limit=20&offset=0&linked_partitioning=1&app_version=1683798046&app_locale=en
+            endpoint = "search";
+            queryKey = "q";
+        } else {
+            endpoint = "search/tracks";
+            queryKey = "q";
+        }
+
+        // Fetch search results
+        const json = SearchPagerVideos.fetchSearchResults(context, endpoint, queryKey, limit, offset);
+
+        // Validate the response
+        const collection = SearchPagerVideos.validateResponse(json);
+        
+        // Filter premium content if needed
+        const filteredcollection = filterPremiumContent(collection);
+        
+        // Map the results
+        const results = SearchPagerVideos.mapResults(filteredcollection);
+        
+        // Determine if there are more results
+        const hasMore = results.length >= limit;
+
+        return { results: results, hasMore };
+    }
+
+    /**
+     * Constructs the URL, fetches data, and parses it as JSON
+     * @param {object} context - The search context
+     * @param {string} endpoint - The API endpoint
+     * @param {string} queryKey - The query key for the search term
+     * @param {number} limit - The number of results per page
+     * @param {number} offset - The offset for pagination
+     * @returns {object} - The parsed JSON response
+     */
+    static fetchSearchResults(context, endpoint, queryKey, limit, offset) {
+        const url = `${API_URL}${endpoint}?${queryKey}=${encodeURIComponent(context.q)}&client_id=${CLIENT_ID}&limit=${limit}&offset=${offset}&linked_partitioning=1${URL_ADDITIVE}`;
+
+        const resp = callUrl(url);
+        let json;
+        try {
+            json = JSON.parse(resp.body);
+        } catch (error) {
+            throw new ScriptException("Invalid JSON response: " + error.message);
+        }
+        return json;
+    }
+
+    /**
+     * Validates the response to ensure the collection exists
+     * @param {object} json - The parsed JSON response
+     * @returns {Array} - The collection of results
+     */
+    static validateResponse(json) {
+        if (!json || !json.collection) {
+            if (IS_TESTING) console.log("Soundcloud search response: " + JSON.stringify(json));
+            throw new ScriptException("Could not find collection");
+        }
+        return json.collection;
+    }
+
+    /**
+     * Maps the search results to platform-specific objects
+     * @param {Array} collection - The search results collection
+     * @returns {Array} - The mapped results
+     */
+    static mapResults(collection) {
+        const results = [];
+
+        for (const result of collection) {
+            switch (result.kind) {
+                case "track":
+                    results.push(soundcloudTrackToPlatformVideo(result));
+                    break;
+                case "user":
+                    continue    
+                    results.push(soundcloudUserToPlatformChannel(result));
+                    break;
+                case "playlist":
+                case "album":
+                    // results.push(soundcloudPlaylistToPlatformPlaylist(result));
+                    break;
+                default:
+                    if (IS_TESTING) console.log("Soundcloud search result: " + JSON.stringify(result));
+                    throw new ScriptException("Unknown kind: " + result.kind);
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Returns a new instance of the next page of results
+     * @returns {SearchPagerVideos} - The next page instance
+     */
     nextPage() {
-        this.context.page = this.context.page + 1
-        return new SearchPagerVideos(this.context)
+        return new SearchPagerVideos({ ...this.context, page: this.context.page + 1 });
     }
 }
 class ChannelVideoPager extends VideoPager {
@@ -1005,6 +1070,22 @@ function dateToUnixSeconds(date) {
     }
     
     return Math.round(Date.parse(date) / 1000);
+}
+
+
+/**
+ * Filters out premium content based on user settings
+ * @param {Array} results - The mapped results
+ * @returns {Array} - The filtered results
+ */
+function filterPremiumContent(results) {
+        // If hiding premium content is not enabled, return all results as-is
+        if (!_settings.hidePremiumContent) {
+            return results;
+        }
+    
+        // Filter out premium content with "SUB_HIGH_TIER" monetization model
+        return results.filter(item => item.monetization_model !== "SUB_HIGH_TIER");
 }
 
 console.log('LOADED')
