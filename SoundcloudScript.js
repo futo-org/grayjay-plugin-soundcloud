@@ -305,9 +305,13 @@ source.getContentDetails = function (url) {
         }
     }
 
-    // for performance reasons, select just the mpeg transcoding if it exists; otherwise, select the first transcoding
     if (data.media.transcodings?.length === 0) throw new ScriptException('Could not find transcodings')
-    const transcoding = data.media.transcodings.find((transcoding) => (transcoding.format.mime_type = 'audio/mpeg')) ?? data.media.transcodings[0]
+    
+    const transcoding = data.media.transcodings.find((transcoding) => (transcoding.format.protocol == 'hls'));
+
+    if(!transcoding) {
+        throw new UnavailableException("No playable sources were found.");
+    }
 
     const authorization = data.track_authorization
     const generated_url = transcoding.url + `?client_id=${CLIENT_ID}&track_authorization=${authorization}`
@@ -317,10 +321,11 @@ source.getContentDetails = function (url) {
 
     const sources = [
         new HLSSource({
-            name: `${transcoding.format.mime_type}`,
+            name: `${transcoding.format.mime_type} ${transcoding?.quality ?? ''}`,
             duration: transcoding.duration,
             url: hls_url,
-            language: "Unknown"
+            language: "Unknown",
+            container: transcoding.format.mime_type
         }),
     ]
 
