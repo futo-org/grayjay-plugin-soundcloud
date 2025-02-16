@@ -7,7 +7,7 @@
     "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
     "repositoryUrl": "https://futo.org",
     "scriptUrl": "./SoundcloudScript.js",
-    "version": 17,
+    "version": 18,
     "iconUrl": "./soundcloud.png",
     "id": "5fb74e28-2fba-406a-9418-38af04f63c08",
     "scriptSignature": "",
@@ -15,5 +15,20 @@
     "packages": ["Http"],
     "allowEval": false,
     "allowUrls": ["api-v2.soundcloud.com", "soundcloud.com", "a-v2.sndcdn.com", "m.soundcloud.com", "on.soundcloud.com"],
-    "supportedClaimTypes": [17]
+    "supportedClaimTypes": [17],
+    "settings": [
+		{
+			"variable": "hidePremiumContent",
+			"name": "Hide premium content",
+			"description": "Hides premium content you do not have access",
+			"type": "Boolean",
+			"default": "true"
+		}
+	],
+  "changelog": {
+		"18": [
+      "Add setting to hide premium content from search results;",
+      "Fix no audio on some SoundCloud tracks;"
+	]
+	}
 }
