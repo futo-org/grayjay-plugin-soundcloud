@@ -5,7 +5,7 @@
     "platformUrl": "https://soundcloud.com",
     "authorUrl": "https://futo.org",
     "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
-    "repositoryUrl": "https://futo.org",
+    "repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/soundcloud",
     "scriptUrl": "./SoundcloudScript.js",
     "version": 18,
     "iconUrl": "./soundcloud.png",
