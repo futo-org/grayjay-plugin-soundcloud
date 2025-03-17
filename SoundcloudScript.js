@@ -569,6 +569,10 @@ function getHomepageContent(context) {
 
     const resp = callUrl(url)
 
+    if (!resp.isOk) {
+        return source.getPlaylist("https://soundcloud.com/soundcloud/sets/tracks-of-the-week").contents
+    }
+
     /** @type {import("./types").HomepageResponse} */
     const json = JSON.parse(resp.body)
 
