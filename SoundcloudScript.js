@@ -3,7 +3,7 @@ const API_URL = 'https://api-v2.soundcloud.com/'
 const APP_LOCALE = 'en'
 const PLATFORM = 'Soundcloud'
 const PLATFORM_CLAIMTYPE = 16;
-const SOUNDCLOUD_APP_VERSION = '1735826482'
+const SOUNDCLOUD_APP_VERSION = '1743501477'
 const USER_AGENT_DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 const USER_AGENT_MOBILE = 'Mozilla/5.0 (Linux; Android 10; Pixel 6a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 
@@ -340,8 +340,37 @@ source.getContentDetails = function (url) {
     const likesCount = Number.isFinite(data?.likes_count) ? data.likes_count : 0;
     sct.rating = new RatingLikes(likesCount);
 
+    sct.getContentRecommendations = function() {
+        return source.getContentRecommendations(url);
+    }
+
     return new PlatformVideoDetails(sct)
 }
+
+source.getContentRecommendations = function(url) {
+
+    const trackId = extractTrackId(url);
+    if (!trackId) {
+        return new ContentPager([], false);
+    }
+
+    const resp = callUrl(`${API_URL}tracks/${trackId}/related?client_id=${CLIENT_ID}&limit=20&offset=0&linked_partitioning=1${URL_ADDITIVE}`);
+    if (!resp.isOk) {
+        return new ContentPager([], false);
+    }
+    
+    const json = JSON.parse(resp.body);
+    const collection = json.collection || [];
+    
+    const videos = collection.map(track => soundcloudTrackToPlatformVideo(track));
+    
+    return new RelatedTracksPager({
+        videos,
+        hasMore: !!json.next_href,
+        nextUrl: json.next_href
+    });
+};
+
 source.getComments = function (url) {
     return new ExtendableCommentPager({ url: url, page: 1, page_size: 20 })
 }
@@ -1101,6 +1130,61 @@ function filterPremiumContent(results) {
     
         // Filter out premium content with "SUB_HIGH_TIER" monetization model
         return results.filter(item => item.monetization_model !== "SUB_HIGH_TIER");
+}
+
+function resolveTrack(url) {
+    const match = url.match(/soundcloud\.com\/[^\/]+\/([^\/\?]+)/);
+    if (match && match[1]) {
+        // Get actual numeric track ID from the permalink
+        const resp = callUrl(`${API_URL}resolve?url=${encodeURIComponent(url)}&client_id=${CLIENT_ID}${URL_ADDITIVE}`);
+        debugger;
+        if (resp.isOk) {
+            const trackData = JSON.parse(resp.body);
+            debugger;
+            return trackData;
+        }
+    }
+    return null;
+}
+
+// Helper function to extract track ID from URL
+function extractTrackId(url) {
+    return resolveTrack(url)?.id;
+}
+
+// Pager for related tracks
+class RelatedTracksPager extends VideoPager {
+    constructor({ videos, hasMore, nextUrl }) {
+        super(videos, hasMore);
+        this.nextUrl = nextUrl;
+    }
+
+    nextPage() {
+        if (!this.nextUrl) {
+            this.hasMore = false;
+            return this;
+        }
+
+        // Add client_id to nextUrl if not present
+        const url = this.nextUrl.includes('client_id=') ? 
+            this.nextUrl : 
+            `${this.nextUrl}${this.nextUrl.includes('?') ? '&' : '?'}client_id=${CLIENT_ID}${URL_ADDITIVE}`;
+
+        const resp = callUrl(url);
+        
+        if (!resp.isOk) {
+            this.hasMore = false;
+            return this;
+        }
+
+        const json = JSON.parse(resp.body);
+        
+        this.results = (json.collection || []).map(track => soundcloudTrackToPlatformVideo(track));
+        this.hasMore = !!json.next_href;
+        this.nextUrl = json.next_href;
+        
+        return this;
+    }
 }
 
 console.log('LOADED')

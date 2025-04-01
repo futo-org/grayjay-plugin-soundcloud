@@ -31,7 +31,8 @@
       "Fix no audio on some SoundCloud tracks;"
     ],
     "20": [
-      "Feature: Add support for private tracks;"
+      "Feature: Add support for private tracks;",
+      "Feature: Add content recomendation support;"
 	]
 	}
 }
