@@ -9,7 +9,7 @@ const USER_AGENT_MOBILE = 'Mozilla/5.0 (Linux; Android 10; Pixel 6a) AppleWebKit
 
 const URL_BASE = "https://soundcloud.com";
 
-let CLIENT_ID = 'iZIs9mchVcX5lhVRyQGGAYlNPVldzAoX' // correct as of June 2023, enable changes this to get the latest
+let CLIENT_ID = 'BizZxLUFle6OLJ9qji8QOBL8ndasTmdg' // correct as of May 2025, enable changes this to get the latest
 const URL_ADDITIVE = `&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=${APP_LOCALE}`
 
 const REGEX_CHANNEL_PLAYLISTS = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/sets\/[a-zA-Z0-9_-]+(\?[^#]*)?$/;
@@ -288,7 +288,7 @@ source.getContentDetails = function (url) {
             console.log(html);
         throw new ScriptException('Could not find video info')
     }
-
+    
     /** @type {SCHydration[]} */
     const json = JSON.parse(matched[1])
 
@@ -308,13 +308,19 @@ source.getContentDetails = function (url) {
     if (data.media.transcodings?.length === 0) throw new ScriptException('Could not find transcodings')
     
     const transcoding = data.media.transcodings.find((transcoding) => (transcoding.format.protocol == 'hls'));
-
+    
     if(!transcoding) {
         throw new UnavailableException("No playable sources were found.");
     }
 
-    const authorization = data.track_authorization
-    const generated_url = transcoding.url + `?client_id=${CLIENT_ID}&track_authorization=${authorization}`
+    const parsedTranscodingUrl = new URL(transcoding.url);
+    // Private track URLs already contain a "secret_token" query param.
+    // Previous version incorrectly added new params using "?" instead of "&",
+    // resulting in invalid URLs like "example.com?secret_token=xyz?param=value which returned an error from the SoundCloud API.
+    parsedTranscodingUrl.searchParams.append('client_id', CLIENT_ID);
+    parsedTranscodingUrl.searchParams.append('track_authorization', data.track_authorization);
+
+    const generated_url = parsedTranscodingUrl.toString();
 
     const hls_resp = callUrl(generated_url)
     const hls_url = JSON.parse(hls_resp.body).url
