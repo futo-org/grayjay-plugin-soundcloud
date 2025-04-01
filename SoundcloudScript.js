@@ -306,8 +306,8 @@ source.getContentDetails = function (url) {
     }
 
     if (data.media.transcodings?.length === 0) throw new ScriptException('Could not find transcodings')
-    
-    const transcoding = data.media.transcodings.find((transcoding) => (transcoding.format.protocol == 'hls'));
+
+    const transcoding = data.media.transcodings.find((transcoding) => (transcoding.format.protocol == 'hls' && transcoding.is_legacy_transcoding));
     
     if(!transcoding) {
         throw new UnavailableException("No playable sources were found.");
