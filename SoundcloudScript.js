@@ -9,7 +9,7 @@ const USER_AGENT_MOBILE = 'Mozilla/5.0 (Linux; Android 10; Pixel 6a) AppleWebKit
 
 const URL_BASE = "https://soundcloud.com";
 
-let CLIENT_ID = 'BizZxLUFle6OLJ9qji8QOBL8ndasTmdg' // correct as of May 2025, enable changes this to get the latest
+let CLIENT_ID = 'BizZxLUFle6OLJ9qji8QOBL8ndasTmdg' // correct as of April 2025, enable changes this to get the latest
 const URL_ADDITIVE = `&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=${APP_LOCALE}`
 
 const REGEX_CHANNEL_PLAYLISTS = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/sets\/[a-zA-Z0-9_-]+(\?[^#]*)?$/;
