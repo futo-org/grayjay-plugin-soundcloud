@@ -3,13 +3,13 @@ const API_URL = 'https://api-v2.soundcloud.com/'
 const APP_LOCALE = 'en'
 const PLATFORM = 'Soundcloud'
 const PLATFORM_CLAIMTYPE = 16;
-const SOUNDCLOUD_APP_VERSION = '1735826482'
+const SOUNDCLOUD_APP_VERSION = '1743501477'
 const USER_AGENT_DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 const USER_AGENT_MOBILE = 'Mozilla/5.0 (Linux; Android 10; Pixel 6a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 
 const URL_BASE = "https://soundcloud.com";
 
-let CLIENT_ID = 'iZIs9mchVcX5lhVRyQGGAYlNPVldzAoX' // correct as of June 2023, enable changes this to get the latest
+let CLIENT_ID = 'BizZxLUFle6OLJ9qji8QOBL8ndasTmdg' // correct as of April 2025, enable changes this to get the latest
 const URL_ADDITIVE = `&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=${APP_LOCALE}`
 
 const REGEX_CHANNEL_PLAYLISTS = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/sets\/[a-zA-Z0-9_-]+(\?[^#]*)?$/;
@@ -277,6 +277,7 @@ source.isContentDetailsUrl = function (url) {
     // https://soundcloud.com/toosii2x/toosii-favorite-song
     return !source.isPlaylistUrl(url) && REGEX_TRACK.test(url)
 }
+
 source.getContentDetails = function (url) {
     const resp = callUrl(url)
 
@@ -284,7 +285,7 @@ source.getContentDetails = function (url) {
 
     const matched = html.match(/window\.__sc_hydration = (.+);/)
     if (!matched) {
-        if(IS_TESTING)
+        if (IS_TESTING)
             console.log(html);
         throw new ScriptException('Could not find video info')
     }
@@ -306,36 +307,107 @@ source.getContentDetails = function (url) {
     }
 
     if (data.media.transcodings?.length === 0) throw new ScriptException('Could not find transcodings')
-    
-    const transcoding = data.media.transcodings.find((transcoding) => (transcoding.format.protocol == 'hls'));
 
-    if(!transcoding) {
+    const batch = http.batch();
+    const transcodings = data.media.transcodings.filter(transcoding => {
+        const codec = extractCodec(transcoding.format.mime_type);
+        // Exclude opus codec completely, regardless of protocol since it's not well supported
+        return codec !== 'opus';
+    });
+
+    transcodings.forEach(transcoding => {
+        // Private track URLs already contain a "secret_token" query param.
+        // Previous version incorrectly added new params using "?" instead of "&",
+        // resulting in invalid URLs like "example.com?secret_token=xyz?param=value which returned an error from the SoundCloud API.
+        const parsedTranscodingUrl = new URL(transcoding.url);
+        parsedTranscodingUrl.searchParams.append('client_id', CLIENT_ID);
+        parsedTranscodingUrl.searchParams.append('track_authorization', data.track_authorization);
+
+        const generated_url = parsedTranscodingUrl.toString();
+        batch.GET(generated_url, {});
+
+    });
+
+    const batchResponses = batch.execute();
+
+    let sources = [];
+
+    batchResponses.forEach((e, i) => {
+        if (e.isOk) {
+
+            const transcoding = transcodings[i];
+            const streamUrl = JSON.parse(e.body)?.url;
+
+            if (!streamUrl) {
+                return; // Skip if no URL found
+            }
+            const sourceDef = {
+                name: `${transcoding.format.protocol} ${transcoding.format.mime_type} ${transcoding?.quality ?? ''} ${transcoding.is_legacy_transcoding ? '(legacy)' : ''}`,
+                duration: transcoding.duration,
+                url: streamUrl,
+                language: "Unknown",
+                container: transcoding.format.mime_type,
+                codec: extractCodec(transcoding.format.mime_type)
+            }
+            if (transcoding.format.protocol == 'progressive') {
+                sources.push(new AudioUrlSource(sourceDef))
+            }
+            else if (transcoding.format.protocol == 'hls') {
+                sources.push(new HLSSource(sourceDef))
+            }
+            //TODO
+            // licenseUri: 'https://license.media-streaming.soundcloud.cloud'
+            
+            // if(transcoding.format.protocol == 'cbc-encrypted-hls'){
+            //     sources.push(new AudioUrlWidevineSource(sourceDef))
+            // }
+
+            // if(transcoding.format.protocol == 'ctr-encrypted-hls'){
+            //     sources.push(new AudioUrlWidevineSource(sourceDef))
+            // }
+        }
+    });
+
+    if (!sources.length) {
         throw new UnavailableException("No playable sources were found.");
     }
-
-    const authorization = data.track_authorization
-    const generated_url = transcoding.url + `?client_id=${CLIENT_ID}&track_authorization=${authorization}`
-
-    const hls_resp = callUrl(generated_url)
-    const hls_url = JSON.parse(hls_resp.body).url
-
-    const sources = [
-        new HLSSource({
-            name: `${transcoding.format.mime_type} ${transcoding?.quality ?? ''}`,
-            duration: transcoding.duration,
-            url: hls_url,
-            language: "Unknown",
-            container: transcoding.format.mime_type
-        }),
-    ]
 
     sct.video = new UnMuxVideoSourceDescriptor([], sources)
     sct.description = data.description
     const likesCount = Number.isFinite(data?.likes_count) ? data.likes_count : 0;
     sct.rating = new RatingLikes(likesCount);
 
+    sct.getContentRecommendations = function() {
+        return source.getContentRecommendations(url);
+    }
+
     return new PlatformVideoDetails(sct)
 }
+
+source.getContentRecommendations = function(url) {
+
+    const trackId = extractTrackId(url);
+    if (!trackId) {
+        return new ContentPager([], false);
+    }
+
+    const resp = callUrl(`${API_URL}tracks/${trackId}/related?client_id=${CLIENT_ID}&limit=20&offset=0&linked_partitioning=1${URL_ADDITIVE}`);
+    if (!resp.isOk) {
+        return new ContentPager([], false);
+    }
+    
+    const json = JSON.parse(resp.body);
+    const collection = json.collection || [];
+    
+    const videos = collection.map(track => soundcloudTrackToPlatformVideo(track));
+    
+    return new RelatedTracksPager({
+        videos,
+        hasMore: !!json.next_href,
+        nextUrl: json.next_href
+    });
+};
+
 source.getComments = function (url) {
     return new ExtendableCommentPager({ url: url, page: 1, page_size: 20 })
 }
@@ -1095,6 +1167,66 @@ function filterPremiumContent(results) {
     
         // Filter out premium content with "SUB_HIGH_TIER" monetization model
         return results.filter(item => item.monetization_model !== "SUB_HIGH_TIER");
+}
+
+function resolveTrack(url) {
+    const match = url.match(/soundcloud\.com\/[^\/]+\/([^\/\?]+)/);
+    if (match && match[1]) {
+        // Get actual numeric track ID from the permalink
+        const resp = callUrl(`${API_URL}resolve?url=${encodeURIComponent(url)}&client_id=${CLIENT_ID}${URL_ADDITIVE}`);
+   
+        if (resp.isOk) {
+            const trackData = JSON.parse(resp.body);          
+            return trackData;
+        }
+    }
+    return null;
+}
+
+// Helper function to extract track ID from URL
+function extractTrackId(url) {
+    return resolveTrack(url)?.id;
+}
+
+// Pager for related tracks
+class RelatedTracksPager extends VideoPager {
+    constructor({ videos, hasMore, nextUrl }) {
+        super(videos, hasMore);
+        this.nextUrl = nextUrl;
+    }
+
+    nextPage() {
+        if (!this.nextUrl) {
+            this.hasMore = false;
+            return this;
+        }
+
+        // Add client_id to nextUrl if not present
+        const url = this.nextUrl.includes('client_id=') ? 
+            this.nextUrl : 
+            `${this.nextUrl}${this.nextUrl.includes('?') ? '&' : '?'}client_id=${CLIENT_ID}${URL_ADDITIVE}`;
+
+        const resp = callUrl(url);
+        
+        if (!resp.isOk) {
+            this.hasMore = false;
+            return this;
+        }
+
+        const json = JSON.parse(resp.body);
+        
+        this.results = (json.collection || []).map(track => soundcloudTrackToPlatformVideo(track));
+        this.hasMore = !!json.next_href;
+        this.nextUrl = json.next_href;
+        
+        return this;
+    }
+}
+
+function extractCodec(inputString) {
+    const codecRegex = /codecs=["']([^"']*)["']/;
+    const match = inputString.match(codecRegex);
+    return match ? match[1] : null;
 }
 
 console.log('LOADED')

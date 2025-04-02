@@ -1,34 +1,50 @@
 {
-    "name": "SoundCloud",
-    "description": "One of the biggest music distribution platforms, Privately owned",
-    "author": "FUTO",
-    "platformUrl": "https://soundcloud.com",
-    "authorUrl": "https://futo.org",
-    "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
-    "repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/soundcloud",
-    "scriptUrl": "./SoundcloudScript.js",
-    "version": 19,
-    "iconUrl": "./soundcloud.png",
-    "id": "5fb74e28-2fba-406a-9418-38af04f63c08",
-    "scriptSignature": "",
-    "scriptPublicKey": "",
-    "packages": ["Http"],
-    "allowEval": false,
-    "allowUrls": ["api-v2.soundcloud.com", "soundcloud.com", "a-v2.sndcdn.com", "m.soundcloud.com", "on.soundcloud.com"],
-    "supportedClaimTypes": [17],
-    "settings": [
-		{
-			"variable": "hidePremiumContent",
-			"name": "Hide premium content",
-			"description": "Hides premium content you do not have access",
-			"type": "Boolean",
-			"default": "true"
-		}
-	],
+  "name": "SoundCloud",
+  "description": "One of the biggest music distribution platforms, Privately owned",
+  "author": "FUTO",
+  "platformUrl": "https://soundcloud.com",
+  "authorUrl": "https://futo.org",
+  "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
+  "repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/soundcloud",
+  "scriptUrl": "./SoundcloudScript.js",
+  "version": 20,
+  "iconUrl": "./soundcloud.png",
+  "id": "5fb74e28-2fba-406a-9418-38af04f63c08",
+  "scriptSignature": "",
+  "scriptPublicKey": "",
+  "packages": [
+    "Http"
+  ],
+  "allowEval": false,
+  "allowUrls": [
+    "api-v2.soundcloud.com",
+    "soundcloud.com",
+    "a-v2.sndcdn.com",
+    "m.soundcloud.com",
+    "on.soundcloud.com"
+  ],
+  "supportedClaimTypes": [
+    17
+  ],
+  "settings": [
+    {
+      "variable": "hidePremiumContent",
+      "name": "Hide premium content",
+      "description": "Hides premium content you do not have access",
+      "type": "Boolean",
+      "default": "true"
+    }
+  ],
   "changelog": {
-		"18": [
+    "18": [
       "Add setting to hide premium content from search results;",
       "Fix no audio on some SoundCloud tracks;"
-	]
-	}
+    ],
+    "20": [
+      "Feature: Add support for private tracks;",
+      "Feature: Add content recommendation support;",
+      "Feature: Adding support for more audio stream types and option to switch between them;",
+      "Fix: Filtering out problematic Opus codec streams that caused playback issues;"
+    ]
+  }
 }
