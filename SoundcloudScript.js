@@ -277,6 +277,7 @@ source.isContentDetailsUrl = function (url) {
     // https://soundcloud.com/toosii2x/toosii-favorite-song
     return !source.isPlaylistUrl(url) && REGEX_TRACK.test(url)
 }
+
 source.getContentDetails = function (url) {
     const resp = callUrl(url)
 
@@ -284,11 +285,11 @@ source.getContentDetails = function (url) {
 
     const matched = html.match(/window\.__sc_hydration = (.+);/)
     if (!matched) {
-        if(IS_TESTING)
+        if (IS_TESTING)
             console.log(html);
         throw new ScriptException('Could not find video info')
     }
-    
+
     /** @type {SCHydration[]} */
     const json = JSON.parse(matched[1])
 
@@ -307,33 +308,69 @@ source.getContentDetails = function (url) {
 
     if (data.media.transcodings?.length === 0) throw new ScriptException('Could not find transcodings')
 
-    const transcoding = data.media.transcodings.find((transcoding) => (transcoding.format.protocol == 'hls' && transcoding.is_legacy_transcoding));
-    
-    if(!transcoding) {
+    const batch = http.batch();
+    const transcodings = data.media.transcodings.filter(transcoding => {
+        const codec = extractCodec(transcoding.format.mime_type);
+        // Exclude opus codec completely, regardless of protocol since it's not well supported
+        return codec !== 'opus';
+    });
+
+    transcodings.forEach(transcoding => {
+        // Private track URLs already contain a "secret_token" query param.
+        // Previous version incorrectly added new params using "?" instead of "&",
+        // resulting in invalid URLs like "example.com?secret_token=xyz?param=value which returned an error from the SoundCloud API.
+        const parsedTranscodingUrl = new URL(transcoding.url);
+        parsedTranscodingUrl.searchParams.append('client_id', CLIENT_ID);
+        parsedTranscodingUrl.searchParams.append('track_authorization', data.track_authorization);
+
+        const generated_url = parsedTranscodingUrl.toString();
+        batch.GET(generated_url, {});
+
+    });
+
+    const batchResponses = batch.execute();
+
+    let sources = [];
+
+    batchResponses.forEach((e, i) => {
+        if (e.isOk) {
+
+            const transcoding = transcodings[i];
+            const streamUrl = JSON.parse(e.body)?.url;
+
+            if (!streamUrl) {
+                return; // Skip if no URL found
+            }
+            const sourceDef = {
+                name: `${transcoding.format.protocol} ${transcoding.format.mime_type} ${transcoding?.quality ?? ''} ${transcoding.is_legacy_transcoding ? '(legacy)' : ''}`,
+                duration: transcoding.duration,
+                url: streamUrl,
+                language: "Unknown",
+                container: transcoding.format.mime_type,
+                codec: extractCodec(transcoding.format.mime_type)
+            }
+            if (transcoding.format.protocol == 'progressive') {
+                sources.push(new AudioUrlSource(sourceDef))
+            }
+            else if (transcoding.format.protocol == 'hls') {
+                sources.push(new HLSSource(sourceDef))
+            }
+            //TODO
+            // licenseUri: 'https://license.media-streaming.soundcloud.cloud'
+            
+            // if(transcoding.format.protocol == 'cbc-encrypted-hls'){
+            //     sources.push(new AudioUrlWidevineSource(sourceDef))
+            // }
+
+            // if(transcoding.format.protocol == 'ctr-encrypted-hls'){
+            //     sources.push(new AudioUrlWidevineSource(sourceDef))
+            // }
+        }
+    });
+
+    if (!sources.length) {
         throw new UnavailableException("No playable sources were found.");
     }
-
-    const parsedTranscodingUrl = new URL(transcoding.url);
-    // Private track URLs already contain a "secret_token" query param.
-    // Previous version incorrectly added new params using "?" instead of "&",
-    // resulting in invalid URLs like "example.com?secret_token=xyz?param=value which returned an error from the SoundCloud API.
-    parsedTranscodingUrl.searchParams.append('client_id', CLIENT_ID);
-    parsedTranscodingUrl.searchParams.append('track_authorization', data.track_authorization);
-
-    const generated_url = parsedTranscodingUrl.toString();
-
-    const hls_resp = callUrl(generated_url)
-    const hls_url = JSON.parse(hls_resp.body).url
-
-    const sources = [
-        new HLSSource({
-            name: `${transcoding.format.mime_type} ${transcoding?.quality ?? ''}`,
-            duration: transcoding.duration,
-            url: hls_url,
-            language: "Unknown",
-            container: transcoding.format.mime_type
-        }),
-    ]
 
     sct.video = new UnMuxVideoSourceDescriptor([], sources)
     sct.description = data.description
@@ -1137,10 +1174,9 @@ function resolveTrack(url) {
     if (match && match[1]) {
         // Get actual numeric track ID from the permalink
         const resp = callUrl(`${API_URL}resolve?url=${encodeURIComponent(url)}&client_id=${CLIENT_ID}${URL_ADDITIVE}`);
-        debugger;
+   
         if (resp.isOk) {
-            const trackData = JSON.parse(resp.body);
-            debugger;
+            const trackData = JSON.parse(resp.body);          
             return trackData;
         }
     }
@@ -1185,6 +1221,12 @@ class RelatedTracksPager extends VideoPager {
         
         return this;
     }
+}
+
+function extractCodec(inputString) {
+    const codecRegex = /codecs=["']([^"']*)["']/;
+    const match = inputString.match(codecRegex);
+    return match ? match[1] : null;
 }
 
 console.log('LOADED')
