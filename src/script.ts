@@ -699,6 +699,7 @@ class ChannelVideoPager extends VideoPager {
 
         this.results = response.collection.filter(filter_tracks).map((track) => sound_cloud_track_to_platform_video(track))
         this.hasMore = response.next_href !== null
+        this.next_href = response.next_href
 
         return this
     }
@@ -1604,7 +1605,7 @@ function resolve_track(url: string): SoundCloudTrack {
     request_url.searchParams.set("app_locale", APP_LOCALE)
 
     // Get actual numeric track ID from the permalink
-    const resp = local_http.GET(request_url.toString(), { }, false)
+    const resp = local_http.GET(request_url.toString(), {}, false)
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const track_data: SoundCloudTrack = JSON.parse(resp.body)

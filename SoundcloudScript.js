@@ -537,6 +537,7 @@ class ChannelVideoPager extends VideoPager {
         const response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
         this.results = response.collection.filter(filter_tracks).map((track) => sound_cloud_track_to_platform_video(track));
         this.hasMore = response.next_href !== null;
+        this.next_href = response.next_href;
         return this;
     }
     hasMorePagers() {
