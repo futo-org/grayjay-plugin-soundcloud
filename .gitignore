@@ -1,0 +1,9 @@
+node_modules
+
+_dist
+
+tsconfig.tsbuildinfo
+bun.lockb
+package-lock.json
+/script.ts
+script.js.map

@@ -1,1232 +1,1329 @@
-//* Constants
-const API_URL = 'https://api-v2.soundcloud.com/'
-const APP_LOCALE = 'en'
-const PLATFORM = 'Soundcloud'
-const PLATFORM_CLAIMTYPE = 16;
-const SOUNDCLOUD_APP_VERSION = '1743501477'
-const USER_AGENT_DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
-const USER_AGENT_MOBILE = 'Mozilla/5.0 (Linux; Android 10; Pixel 6a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
-
+// https://developers.soundcloud.com/docs/api/explorer/open-api
+const API_URL = "https://api-v2.soundcloud.com/";
+const APP_LOCALE = "en";
+const PLATFORM = "SoundCloud";
+const USER_AGENT_DESKTOP = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
+const USER_AGENT_MOBILE = "Mozilla/5.0 (Linux; Android 10; Pixel 6a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 const URL_BASE = "https://soundcloud.com";
-
-let CLIENT_ID = 'BizZxLUFle6OLJ9qji8QOBL8ndasTmdg' // correct as of April 2025, enable changes this to get the latest
-const URL_ADDITIVE = `&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=${APP_LOCALE}`
-
-const REGEX_CHANNEL_PLAYLISTS = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/sets\/[a-zA-Z0-9_-]+(\?[^#]*)?$/;
-const REGEX_SYSTEM_PLAYLISTS = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/[a-zA-Z0-9_-]+\/(likes|popular-tracks|toptracks|tracks|reposts)$/
+const REGEX_CHANNEL_PLAYLIST = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/sets\/[a-zA-Z0-9:/_-]+(\?[^#]*)?$/;
+const REGEX_LIKES_PLAYLIST = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/[a-zA-Z0-9_-]+\/(likes)$/;
 const REGEX_CHANNEL = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/?$/;
 const REGEX_TRACK = /(?:https?:\/\/)?(?:www\.|m\.)?soundcloud\.com\/[a-zA-Z0-9-_]+\/[a-zA-Z0-9-_]+(?:\?[^\s#]*)?/;
-
-const systemPlaylistsMaps = {
-    likes: {
-        path: 'likes',
-        apiPath: 'likes',
-        playlistTitle: 'Likes'
-    },
-    tracks: {
-        path: 'tracks',
-        apiPath: 'tracks',
-        playlistTitle: 'Tracks'
-    },
-    "popular-tracks": {
-        path: "popular-tracks",
-        apiPath: 'toptracks',
-        playlistTitle: 'Popular Tracks'
-    },
-    "reposts": {
-        path: "reposts",
-        apiPath: 'reposts',
-        apiBasePath: 'https://api-v2.soundcloud.com/stream/users',
-        playlistTitle: 'Reposts'
-    },
-}
-
-let config = {}
-
-let state = {
-    channel: {}
-}
-
-let _settings = {
-    hidePremiumContent: true
-}
-
-//* Source
-source.enable = function (conf, settings, saveStateStr) {
-    config = conf ?? {}
-    _settings = settings ?? {}
-
-    if(IS_TESTING) {
-        _settings = {
-            hidePremiumContent: true
-        }
-    }
-
-    
-    CLIENT_ID = getClientId()
-
-    try {
-        if (saveStateStr) {
-            state = JSON.parse(saveStateStr);
-        }
-    } catch (ex) {
-        log('Failed to parse saveState:' + ex);
-    }
-
-    return CLIENT_ID
-}
-source.getHome = function () {
-    return new QueryPager({ page: 1, page_size: 20 })
-}
-source.searchSuggestions = function (query) {
-    const url = `${API_URL}search/queries?q=${query}&client_id=${CLIENT_ID}&limit=10&offset=0&linked_partitioning=1${URL_ADDITIVE}`
-
-    const resp = callUrl(url)
-
-    /** @type {import("./types").SearchAutofillResponse} */
-    const json = JSON.parse(resp.body)
-
-    if (!json['collection']) {
-        throw new ScriptException('Could not find collection')
-    }
-
-    /** @type {{output: string; query: string}[]} */
-    const collection = json['collection']
-
-    return collection.map((item) => item['query'])
-}
-source.getSearchCapabilities = () => {
-    return {
-        types: [Type.Feed.Mixed], // can also do albums, playlists, channels those do not have types yet
-        sorts: [],
-        filters: [], // filters depend on type
-    }
-}
-source.search = function (query, type, order, filters) {
-    return new SearchPagerVideos({ q: query, page: 1, page_size: 20, get_all: false })
-}
-source.getSearchChannelContentsCapabilities = function () {
-    return {
-        types: [Type.Feed.Mixed],
-        sorts: [Type.Order.Chronological],
-        filters: [],
-    }
-}
-source.searchChannelContent = function (channelUrl, query, type, order, filters) {
-    return []
-}
-source.searchChannels = function (query) {
-    return new SearchPagerChannels({ q: query, page: 1, page_size: 20 })
-}
-source.isChannelUrl = function (url) {
-    // see if it matches https://soundcloud.com/nfrealmusic
-    return !source.isPlaylistUrl(url) && REGEX_CHANNEL.test(url)
-}
-source.getChannel = function (url) {
-
-    if(state.channel[url]) {
-        return state.channel[url];
-    }
-
-    const resp = callUrl(url)
-
-    const html = resp.body
-
-    const matched = html.match(/window\.__sc_hydration = (.+);/)
-    if (!matched) {
-        throw new ScriptException('Could not find channel info')
-    }
-
-    /** @type {import("./types").SCHydration[]} */
-    const json = JSON.parse(matched[1])
-
-    for (let object of json) {
-        if (object.hydratable === 'user') {
-            state.channel[url] = soundcloudUserToPlatformChannel(object.data);
-            return state.channel[url];
-        }
-    }
-
-    throw new ScriptException('Could not find channel info')
-}
-source.getChannelContents = function (url) {
-    return new ChannelVideoPager({ url: url, page_size: 20, offset_date: 0 })
-}
-
-source.getChannelPlaylists = (url) => {
-
-    const channelSlug = extractSoundCloudId(url);
-    
-    const channel = source.getChannel(`${URL_BASE}/${channelSlug}`);
-
-    const author =  new PlatformAuthorLink(
-        new PlatformID(PLATFORM,channel.id.value.toString(),config.id,PLATFORM_CLAIMTYPE),
-        channel.name,
-        channel.url,
-        channel.thumbnail,
-    );
-
-    class ChannelPlaylistsPager extends ContentPager {
-        constructor({
-            results = [],
-            hasMore = true,
-            context = {withNext: []},
-          }) {
-            
-            super(results, hasMore, context);
-          }
-
-          nextPage() {
-              
-            let withNext = this.context.withNext ?? [];
-            let firstPage = this.context.firstPage ?? false;
-            
-            let all = firstPage ? (this.results ?? []) : [];
-
-            let batch = http.batch();
-            
-            withNext.forEach(url => {
-                batch.GET(url, {});
-            });
-
-            const responses = batch.execute();
-        
-            withNext = [];
-        
-            for(var ct = 0; ct < responses.length; ct++) {
-                const res = responses[ct];
-                
-                if(res.isOk) {
-                    const body = JSON.parse(res.body);
-                    
-                    if(body.next_href) {
-                        withNext.push(`${body.next_href}$?client_id=${CLIENT_ID}`);
-                    }
-        
-                    const currentCollection = body.collection.map(v => {
-                        
-                        return new PlatformPlaylist({
-                            id: new PlatformID(PLATFORM, v.id.toString(), config.id, PLATFORM_CLAIMTYPE),
-                            author: author,
-                            name: v.title,
-                            thumbnail: v.artwork_url,
-                            videoCount: v?.track_count ?? -1,
-                            datetime: dateToUnixSeconds(v.display_date),
-                            url: v.permalink_url,
-                          })
-                    });            
-        
-                    all = [...all, ...currentCollection]
-                    
-                }
-                
-            }
-        
-            const hasMore = !!withNext.length;
-            
-            return new ChannelPlaylistsPager({results: all, hasMore, context: { withNext }});
-          }
-    }
-
-    let withNext = [
-        `albums`,
-        `playlists_without_albums`
-    ].map((path) => `https://api-v2.soundcloud.com/users/${channel.id.value}/${path}?client_id=${CLIENT_ID}&limit=10&offset=0&linked_partitioning=1&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=en`);
-
-// system playlists
-    let results = [
-        'likes',
-        'popular-tracks',
-        'tracks',
-        'reposts'
-    ].map(path => {
-
-        const info = systemPlaylistsMaps[path];
-
-        const name = info?.playlistTitle ?? path;
-        const playlistPath = info?.path ?? path;
-
-        return new PlatformPlaylist({
-            id: new PlatformID(PLATFORM, '', config.id, PLATFORM_CLAIMTYPE),
-            author: author,
-            name: name,
-            thumbnail: channel.banner || channel.thumbnail || '',
-            videoCount: -1,
-            // datetime: dateToUnixSeconds(v.display_date),
-            url: `https://soundcloud.com/${channelSlug}/${playlistPath}`,
-          })
-    })
-
-    return new ChannelPlaylistsPager({ results, context: { withNext, firstPage: true } }).nextPage();
-
-}
-
-
-source.getChannelTemplateByClaimMap = () => {
-    return {
-        //SoundCloud
-        17: {
-            0: URL_BASE + "/{{CLAIMVALUE}}"
-            //Unused! 1: https://api.soundcloud.com/users/{{CLAIMVALUE}}
-        }
-    };
+const HYDRATION_REGEX = /window\.__sc_hydration = (.+);/;
+const HARDCODED_THUMBNAIL_QUALITY = 1080;
+const HARDCODED_ZERO = 0;
+const local_http = http;
+let local_settings;
+/** State */
+let local_state;
+//#endregion
+//#region source methods
+const local_source = {
+    enable,
+    disable,
+    saveState,
+    getHome,
+    searchSuggestions,
+    getSearchCapabilities,
+    search,
+    searchChannels,
+    isChannelUrl,
+    isPlaylistUrl,
+    isContentDetailsUrl,
+    getChannel,
+    getChannelContents,
+    getChannelPlaylists,
+    getContentDetails,
+    getContentRecommendations,
+    getComments,
+    getUserSubscriptions,
+    getUserPlaylists,
+    getPlaylist,
+    searchPlaylists,
 };
-
-
-source.isContentDetailsUrl = function (url) {
-    // https://soundcloud.com/toosii2x/toosii-favorite-song
-    return !source.isPlaylistUrl(url) && REGEX_TRACK.test(url)
+init_source(local_source);
+function init_source(local_source) {
+    for (const method_key of Object.keys(local_source)) {
+        // @ts-expect-error assign to readonly constant source object
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        source[method_key] = local_source[method_key];
+    }
 }
-
-source.getContentDetails = function (url) {
-    const resp = callUrl(url)
-
-    const html = resp.body
-
-    const matched = html.match(/window\.__sc_hydration = (.+);/)
-    if (!matched) {
-        if (IS_TESTING)
-            console.log(html);
-        throw new ScriptException('Could not find video info')
+//#endregion
+//#region enable
+function enable(conf, settings, saved_state) {
+    if (IS_TESTING) {
+        log("IS_TESTING true");
+        log("logging configuration");
+        log(conf);
+        log("logging settings");
+        log(settings);
+        log("logging saved_state");
+        log(saved_state);
     }
-
-    /** @type {SCHydration[]} */
-    const json = JSON.parse(matched[1])
-
-    /** @type {import("./types").SoundcloudTrack} */
-    let data
-    /** @type {import("./types").SoundcloudTrack} */
-    let sct
-
-    for (let object of json) {
-        if (object.hydratable === 'sound') {
-            data = object.data
-            sct = soundcloudTrackToPlatformVideo(data)
-            break
+    local_settings = settings;
+    if (saved_state !== null && saved_state !== undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const state = JSON.parse(saved_state);
+        local_state = state;
+    }
+    else {
+        const responses = local_http
+            .batch()
+            .GET("https://m.soundcloud.com/discover", { "User-Agent": USER_AGENT_MOBILE }, false)
+            .GET(`${API_URL}me`, {}, true)
+            .execute();
+        if (responses[0] === undefined || responses[1] === undefined) {
+            throw new ScriptException("unreachable");
         }
-    }
-
-    if (data.media.transcodings?.length === 0) throw new ScriptException('Could not find transcodings')
-
-    const batch = http.batch();
-    const transcodings = data.media.transcodings.filter(transcoding => {
-        const codec = extractCodec(transcoding.format.mime_type);
-        // Exclude opus codec completely, regardless of protocol since it's not well supported
-        return codec !== 'opus';
-    });
-
-    transcodings.forEach(transcoding => {
-        // Private track URLs already contain a "secret_token" query param.
-        // Previous version incorrectly added new params using "?" instead of "&",
-        // resulting in invalid URLs like "example.com?secret_token=xyz?param=value which returned an error from the SoundCloud API.
-        const parsedTranscodingUrl = new URL(transcoding.url);
-        parsedTranscodingUrl.searchParams.append('client_id', CLIENT_ID);
-        parsedTranscodingUrl.searchParams.append('track_authorization', data.track_authorization);
-
-        const generated_url = parsedTranscodingUrl.toString();
-        batch.GET(generated_url, {});
-
-    });
-
-    const batchResponses = batch.execute();
-
-    let sources = [];
-
-    batchResponses.forEach((e, i) => {
-        if (e.isOk) {
-
-            const transcoding = transcodings[i];
-            const streamUrl = JSON.parse(e.body)?.url;
-
-            if (!streamUrl) {
-                return; // Skip if no URL found
+        const html = responses[0].body;
+        const matched = html.match(/"clientId":"([a-zA-Z0-9-_]+)"/);
+        if (!matched?.[1]) {
+            throw new ScriptException('Could not find client_id');
+        }
+        const matched_version = html.match(/"buildVersion":"([0-9]+)"/);
+        if (!matched_version?.[1]) {
+            throw new ScriptException('Could not find app_version');
+        }
+        const is_premium = (() => {
+            if (bridge.isLoggedIn()) {
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+                const me_response = JSON.parse(responses[1].body);
+                return me_response.consumer_subscription.product.id === "consumer-high-tier";
             }
-            const sourceDef = {
-                name: `${transcoding.format.protocol} ${transcoding.format.mime_type} ${transcoding?.quality ?? ''} ${transcoding.is_legacy_transcoding ? '(legacy)' : ''}`,
-                duration: transcoding.duration,
-                url: streamUrl,
-                language: "Unknown",
-                container: transcoding.format.mime_type,
-                codec: extractCodec(transcoding.format.mime_type)
+            else {
+                return false;
             }
-            if (transcoding.format.protocol == 'progressive') {
-                sources.push(new AudioUrlSource(sourceDef))
+        })();
+        local_state = {
+            app_version: parseInt(matched_version[1]),
+            client_id: matched[1],
+            is_premium
+        };
+    }
+}
+//#endregion
+function disable() {
+    log("SoundCloud log: disabling");
+}
+function saveState() {
+    return JSON.stringify(local_state);
+}
+//#region home
+function getHome() {
+    if (bridge.isLoggedIn()) {
+        switch (local_settings.home_preference) {
+            case 2 /* Home.Charts */: {
+                return new ChartsPager(0, 10);
             }
-            else if (transcoding.format.protocol == 'hls') {
-                sources.push(new HLSSource(sourceDef))
+            case 0 /* Home.Discover */: {
+                return new DiscoverPager(0, 10);
             }
-            //TODO
-            // licenseUri: 'https://license.media-streaming.soundcloud.cloud'
-            
-            // if(transcoding.format.protocol == 'cbc-encrypted-hls'){
-            //     sources.push(new AudioUrlWidevineSource(sourceDef))
-            // }
-
-            // if(transcoding.format.protocol == 'ctr-encrypted-hls'){
-            //     sources.push(new AudioUrlWidevineSource(sourceDef))
-            // }
-        }
-    });
-
-    if (!sources.length) {
-        throw new UnavailableException("No playable sources were found.");
-    }
-
-    sct.video = new UnMuxVideoSourceDescriptor([], sources)
-    sct.description = data.description
-    const likesCount = Number.isFinite(data?.likes_count) ? data.likes_count : 0;
-    sct.rating = new RatingLikes(likesCount);
-
-    sct.getContentRecommendations = function() {
-        return source.getContentRecommendations(url);
-    }
-
-    return new PlatformVideoDetails(sct)
-}
-
-source.getContentRecommendations = function(url) {
-
-    const trackId = extractTrackId(url);
-    if (!trackId) {
-        return new ContentPager([], false);
-    }
-
-    const resp = callUrl(`${API_URL}tracks/${trackId}/related?client_id=${CLIENT_ID}&limit=20&offset=0&linked_partitioning=1${URL_ADDITIVE}`);
-    if (!resp.isOk) {
-        return new ContentPager([], false);
-    }
-    
-    const json = JSON.parse(resp.body);
-    const collection = json.collection || [];
-    
-    const videos = collection.map(track => soundcloudTrackToPlatformVideo(track));
-    
-    return new RelatedTracksPager({
-        videos,
-        hasMore: !!json.next_href,
-        nextUrl: json.next_href
-    });
-};
-
-source.getComments = function (url) {
-    return new ExtendableCommentPager({ url: url, page: 1, page_size: 20 })
-}
-// not in Soundcloud
-source.getSubComments = function (comment) {
-    return new CommentPager([], false, {})
-}
-source.getUserSubscriptions = function () {
-    const following_resp = callUrl('https://soundcloud.com/you/following', true)
-    const html = following_resp.body
-    if(IS_TESTING)
-        console.log(html)
-    const matched = html.match(/window\.__sc_hydration = (.+);/)
-    if (!matched) throw new ScriptException('Could not find user info')
-    /** @type {SCHydration[]} */
-    const following_json = JSON.parse(matched[1])
-    let id
-    for (let object of following_json) {
-        if (object.hydratable === 'meUser') {
-            id = object.data.id
-            break
+            case 1 /* Home.Feed */: {
+                return new FeedPager(0, 10);
+            }
+            default:
+                throw assert_exhaustive(local_settings.home_preference, "unreachable");
         }
     }
-    if (!id) throw new ScriptException('Could not find user info')
-
-    const resp = callUrl(`${API_URL}users/${id}/followings?client_id=${CLIENT_ID}&limit=12&offset=0&linked_partitioning=1${URL_ADDITIVE}}`, true)
-
-    const json = JSON.parse(resp.body)
-
-    /** @type {import("./types.d.ts").SoundcloudUser[]} */
-    const users = json.collection
-
-    return users.map((user) => user.permalink_url)
+    else {
+        return new ChartsPager(0, 10);
+    }
 }
-source.getUserPlaylists = function () {
-    const url = `${API_URL}me/library/all?client_id=${CLIENT_ID}&limit=10&offset=0&linked_partioning=1${URL_ADDITIVE}`
-
-    const resp = callUrl(url, true)
-
-    if(IS_TESTING) {
-        console.log(url)
-        console.log(resp.body)
+class FeedPager extends ContentPager {
+    next_href;
+    constructor(offset, limit) {
+        const feed_url = new URL(`${API_URL}stream`);
+        feed_url.searchParams.set("promoted_playlist", "true");
+        feed_url.searchParams.set("activityTypes", "TrackPost,TrackRepost,PlaylistPost");
+        feed_url.searchParams.set("client_id", local_state.client_id);
+        feed_url.searchParams.set("limit", limit.toString());
+        feed_url.searchParams.set("offset", offset.toString());
+        feed_url.searchParams.set("linked_partitioning", (1).toString());
+        feed_url.searchParams.set("app_version", local_state.app_version.toString());
+        feed_url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const feed_response = JSON.parse(local_http.GET(feed_url.toString(), { "User-Agent": USER_AGENT_DESKTOP }, true).body);
+        super(format_feed_response(feed_response), feed_response.next_href !== null);
+        this.next_href = feed_response.next_href;
     }
-    const json = JSON.parse(resp.body)
-
-    if(IS_TESTING)
-        console.log(json)
-
-    /** @type {import("./types.d.ts").PlaylistWrapper[]} */
-    const playlists = json.collection
-
-    return playlists.map((playlist) => {
-        if ('playlist' in playlist) {
-            return playlist.playlist.permalink_url
-        } else if ('system_playlist' in playlist) {
-            return playlist.system_playlist.permalink_url
-        }
-    })
-}
-source.isPlaylistUrl = function (url) {
-    return isSoundCloudChannelPlaylistUrl(url)
-}
-source.getPlaylist = function (url) {  
-
-    if(isSoundCloudSystemPlaylist(url)){
-        return standardPlaylistPager(url);
-    }
-    
-    const resp = callUrl(url, true)
-
-    const html = resp.body
-
-    const matched = html.match(/window\.__sc_hydration = (.+);/)
-
-    if (!matched) {
-        throw new ScriptException('Could not find playlist info')
-    }
-
-    /** @type {SCHydration[]} */
-    const json = JSON.parse(matched[1])
-    
-    /** @type {number[]} */
-    let ids = []
-    let playlistTitle = '';
-    let playlistId = '';
-
-    for (let object of json) {
-        if (object.hydratable === 'systemPlaylist') {
-            ids = object.data.tracks.map((track) => track.id) 
-            break
-        } else if (object.hydratable === 'playlist') {
-            ids = object.data.tracks.map((track) => track.id)
-            playlistTitle = object.data.title
-            playlistId = object.data.id.toString()     
-            break
-        }
-    }
-
-    let user = json.find(object => object.hydratable === 'user');
-    
-    let author;
-
-    if(user) {
-        author =  new PlatformAuthorLink(
-            new PlatformID(
-              PLATFORM,
-              user.data.id.toString(),
-              config.id,
-              PLATFORM_CLAIMTYPE,
-            ),
-            user.data.username,
-            user.data.permalink_url,
-            user.data.avatar_url,
-          );
-    } else {
-        author =  new PlatformAuthorLink(
-            new PlatformID(
-                PLATFORM,
-                '',
-                config.id,
-                PLATFORM_CLAIMTYPE,
-            ),
-            '',
-            '',
-            '',
-          );
-    }
-    
-    /** @type {import("./types.d.ts").SoundcloudTrack[]} */
-    let tracks = []
-
-    // split ids into chunks of 50
-    for (let i = 0; i < ids.length; i += 50) {
-        const chunk = ids.slice(i, i + 50)
-
-        const generated_url = `${API_URL}tracks?ids=${chunk.join(',')}&client_id=${CLIENT_ID}${URL_ADDITIVE}`
-        const chunk_resp = callUrl(generated_url, true)
-        const found_tracks = JSON.parse(chunk_resp.body)
-
-        tracks = tracks.concat(found_tracks)
-    }
-    
-    const content = tracks.map(soundcloudTrackToPlatformVideo);
-    
-    return new PlatformPlaylistDetails({
-        url: url,
-        id: new PlatformID(PLATFORM, playlistId, config.id),
-        author: author,
-        name: playlistTitle,
-        videoCount: content?.length ?? 0,
-        contents: new VideoPager(content)
-    });
-
-}
-
-source.saveState = () => {
-    return JSON.stringify(state);
-};
-
-//* Internals
-/**
- * Gets the URL with correct headers
- * @param {string} url
- * @param {boolean} is_authenticated
- * @param {boolean} use_mobile
- * @returns {HTTPResponse}
- */
-function callUrl(url, is_authenticated = false, use_mobile = false) {
-    
-    if(!use_mobile) {
-        url = removeMobilePrefix(url);
-    }
-    
-    let headers = {
-        'User-Agent': use_mobile ? USER_AGENT_MOBILE : USER_AGENT_DESKTOP,
-        DNT: '1',
-        Connection: 'keep-alive',
-        Origin: 'https://soundcloud.com',
-        Referer: 'https://soundcloud.com/',
-    }
-
-    let accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-
-    if (url.includes('api-v2.soundcloud.com')) {
-        accept = 'application/json, text/javascript, */*; q=0.01'
-        headers['Host'] = 'api-v2.soundcloud.com'
-        headers['SEC-FETCH-DEST'] = 'empty'
-        headers['SEC-FETCH-MODE'] = 'cors'
-        headers['SEC-FETCH-SITE'] = 'same-site'
-    } else {
-        headers['SEC-FETCH-DEST'] = 'document'
-        headers['SEC-FETCH-MODE'] = 'navigate'
-        headers['SEC-FETCH-SITE'] = 'none'
-    }
-
-    headers['Accept'] = accept
-
-    return http.GET(url, headers, is_authenticated)
-}
-
-/**
- * Gets the client_id from the Soundcloud home page
- * @returns {string} returns the client_id
- */
-function getClientId() {
-    // request soundcloud.com to find the url of the js file that contains 50-_____.js
-    const resp = callUrl('https://soundcloud.com/discover', false, true)
-    const html = resp.body
-
-    // find "clientId":"iZIs9mchVcX5lhVRyQGGAYlNPVldzAoX"
-    const matched = html.match(/"clientId":"([a-zA-Z0-9-_]+)"/)
-
-    if (!matched) {
-        throw new ScriptException('Could not find client_id')
-    }
-
-    const clientId = matched[1]
-
-    return clientId
-}
-
-/**
- * Gets the Soundcloud homepage content
- * @param {import("./types").HomeContext} context the search context
- * @returns {PlatformVideo[]} returns the homepage content
- */
-function getHomepageContent(context) {
-    const limit = context.page_size
-    const offset = (context.page - 1) * limit
-    const url = `${API_URL}featured_tracks/top/all-music?client_id=${CLIENT_ID}&limit=${limit}&offset=${offset}&linked_partitioning=1${URL_ADDITIVE}`
-
-    const resp = callUrl(url)
-
-    if (!resp.isOk) {
-        return source.getPlaylist("https://soundcloud.com/soundcloud/sets/tracks-of-the-week").contents
-    }
-
-    /** @type {import("./types").HomepageResponse} */
-    const json = JSON.parse(resp.body)
-
-    /** @type {import("./types").SoundcloudTrack[]} */
-    const tracks = json['collection']
-
-    const results = ensureUniqueByProperty(tracks, 'id')
-    .map((track) => {
-        return soundcloudTrackToPlatformVideo(track)
-    });
-
-    const hasMore = json?.['next_href'] !== null
-
-    return { results, hasMore }
-}
-
-//* Pagers
-class QueryPager extends VideoPager {
-    /**
-     * @param {import("./types.d.ts").HomeContext} context the query params
-     */
-    constructor(context) {
-        const data = getHomepageContent(context);
-        super(data.results, data.hasMore, context)
-    }
-
     nextPage() {
-        this.context.page = this.context.page + 1
-        const data = getHomepageContent(this.context)
-        this.results = data.results;
-        this.hasMore = data.hasMore;
-        return this
+        if (!this.hasMore) {
+            this.results = [];
+            return this;
+        }
+        if (this.next_href === null) {
+            throw new ScriptException("unreachable");
+        }
+        const url = new URL(this.next_href);
+        url.searchParams.set("client_id", local_state.client_id);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const feed_response = JSON.parse(local_http.GET(url.toString(), { "User-Agent": USER_AGENT_DESKTOP }, true).body);
+        this.results = format_feed_response(feed_response);
+        this.next_href = feed_response.next_href;
+        this.hasMore = feed_response.next_href !== null;
+        return this;
+    }
+    hasMorePagers() {
+        return this.hasMore;
     }
 }
-class SearchPagerVideos extends VideoPager {
-    /**
-     * @param {import("./types").SearchContext} context the query params
-     */
-    constructor(context) {
-        const resultsData = SearchPagerVideos.fetchAndProcessResults(context); // Fetch and process before calling `super`
-
-        // Call the parent constructor with results, hasMore flag, and context
-        super(resultsData.results, resultsData.hasMore, context);
-    }
-
-    /**
-     * Fetches and processes the search results
-     * @param {object} context - The search context
-     * @returns {object} - An object containing `results` and `hasMore`
-     */
-    static fetchAndProcessResults(context) {
-        const limit = context.page_size;
-        const offset = (context.page - 1) * limit;
-        let endpoint, queryKey;
-
-        if (context.get_all) {
-            // https://api-v2.soundcloud.com/search?q=search%20and%20destroy%20drake&client_id=VDJ3iu7ZYtUMibDTM2XcUbRijDa3L6ug&limit=20&offset=0&linked_partitioning=1&app_version=1683798046&app_locale=en
-            endpoint = "search";
-            queryKey = "q";
-        } else {
-            endpoint = "search/tracks";
-            queryKey = "q";
+function format_feed_response(response) {
+    return response.collection.map(item => {
+        const type = item.type;
+        switch (item.type) {
+            case "track":
+                return sound_cloud_track_to_platform_video(item.track);
+            case "track-repost":
+                return sound_cloud_track_to_platform_video(item.track);
+            default:
+                throw assert_exhaustive(item, `unknown item type ${type}`);
         }
-
-        // Fetch search results
-        const json = SearchPagerVideos.fetchSearchResults(context, endpoint, queryKey, limit, offset);
-
-        // Validate the response
-        const collection = SearchPagerVideos.validateResponse(json);
-        
-        // Filter premium content if needed
-        const filteredcollection = filterPremiumContent(collection);
-        
-        // Map the results
-        const results = SearchPagerVideos.mapResults(filteredcollection);
-        
-        // Determine if there are more results
-        const hasMore = results.length >= limit;
-
-        return { results: results, hasMore };
+    });
+}
+class DiscoverPager extends ContentPager {
+    next_href;
+    constructor(offset, limit) {
+        const charts_url = new URL(`${API_URL}mixed-selections`);
+        charts_url.searchParams.set("client_id", local_state.client_id);
+        charts_url.searchParams.set("limit", limit.toString());
+        charts_url.searchParams.set("offset", offset.toString());
+        charts_url.searchParams.set("linked_partitioning", (1).toString());
+        charts_url.searchParams.set("app_version", local_state.app_version.toString());
+        charts_url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const discover_response = JSON.parse(local_http.GET(charts_url.toString(), { "User-Agent": USER_AGENT_DESKTOP }, true).body);
+        super(discover_response.collection.flatMap(selection => selection.items.collection.flatMap((selection_item) => {
+            if (selection_item.kind === "user") {
+                return [];
+            }
+            return format_playlist(selection_item);
+        })), discover_response.next_href !== null);
+        this.next_href = discover_response.next_href;
     }
-
-    /**
-     * Constructs the URL, fetches data, and parses it as JSON
-     * @param {object} context - The search context
-     * @param {string} endpoint - The API endpoint
-     * @param {string} queryKey - The query key for the search term
-     * @param {number} limit - The number of results per page
-     * @param {number} offset - The offset for pagination
-     * @returns {object} - The parsed JSON response
-     */
-    static fetchSearchResults(context, endpoint, queryKey, limit, offset) {
-        const url = `${API_URL}${endpoint}?${queryKey}=${encodeURIComponent(context.q)}&client_id=${CLIENT_ID}&limit=${limit}&offset=${offset}&linked_partitioning=1${URL_ADDITIVE}`;
-
-        const resp = callUrl(url);
-        let json;
-        try {
-            json = JSON.parse(resp.body);
-        } catch (error) {
-            throw new ScriptException("Invalid JSON response: " + error.message);
+    nextPage() {
+        if (!this.hasMore) {
+            this.results = [];
+            return this;
         }
-        return json;
-    }
-
-    /**
-     * Validates the response to ensure the collection exists
-     * @param {object} json - The parsed JSON response
-     * @returns {Array} - The collection of results
-     */
-    static validateResponse(json) {
-        if (!json || !json.collection) {
-            if (IS_TESTING) console.log("Soundcloud search response: " + JSON.stringify(json));
-            throw new ScriptException("Could not find collection");
+        if (this.next_href === null) {
+            throw new ScriptException("unreachable");
         }
-        return json.collection;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const discover_response = JSON.parse(local_http.GET(this.next_href, { "User-Agent": USER_AGENT_DESKTOP }, true).body);
+        this.results = discover_response.collection.flatMap(selection => selection.items.collection.flatMap((selection_item) => {
+            if (selection_item.kind === "user") {
+                return [];
+            }
+            return format_playlist(selection_item);
+        }));
+        this.next_href = discover_response.next_href;
+        this.hasMore = discover_response.next_href !== null;
+        return this;
     }
-
-    /**
-     * Maps the search results to platform-specific objects
-     * @param {Array} collection - The search results collection
-     * @returns {Array} - The mapped results
-     */
-    static mapResults(collection) {
-        const results = [];
-
-        for (const result of collection) {
-            switch (result.kind) {
-                case "track":
-                    results.push(soundcloudTrackToPlatformVideo(result));
-                    break;
-                case "user":
-                    continue    
-                    results.push(soundcloudUserToPlatformChannel(result));
-                    break;
-                case "playlist":
-                case "album":
-                    // results.push(soundcloudPlaylistToPlatformPlaylist(result));
-                    break;
+    hasMorePagers() {
+        return this.hasMore;
+    }
+}
+class ChartsPager extends ContentPager {
+    next_href;
+    constructor(offset, limit) {
+        const charts_url = new URL(`${API_URL}charts/selections`);
+        charts_url.searchParams.set("client_id", local_state.client_id);
+        charts_url.searchParams.set("limit", limit.toString());
+        charts_url.searchParams.set("offset", offset.toString());
+        charts_url.searchParams.set("linked_partitioning", (1).toString());
+        charts_url.searchParams.set("app_version", local_state.app_version.toString());
+        charts_url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const charts_response = JSON.parse(local_http.GET(charts_url.toString(), { "User-Agent": USER_AGENT_DESKTOP }, true).body);
+        super(charts_response.collection.flatMap(selection => selection.items.collection.flatMap((selection_item) => {
+            if (selection_item.kind === "user") {
+                return [];
+            }
+            return format_playlist(selection_item);
+        })), charts_response.next_href !== null);
+        this.next_href = charts_response.next_href;
+    }
+    nextPage() {
+        if (!this.hasMore) {
+            this.results = [];
+            return this;
+        }
+        if (this.next_href === null) {
+            throw new ScriptException("unreachable");
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const charts_response = JSON.parse(local_http.GET(this.next_href, { "User-Agent": USER_AGENT_DESKTOP }, true).body);
+        this.results = charts_response.collection.flatMap(selection => selection.items.collection.flatMap((selection_item) => {
+            if (selection_item.kind === "user") {
+                return [];
+            }
+            return format_playlist(selection_item);
+        }));
+        this.next_href = charts_response.next_href;
+        this.hasMore = charts_response.next_href !== null;
+        return this;
+    }
+    hasMorePagers() {
+        return this.hasMore;
+    }
+}
+function format_playlist(playlist) {
+    return new PlatformPlaylist({
+        id: new PlatformID(PLATFORM, playlist.id.toString(), plugin.config.id),
+        name: playlist.title,
+        thumbnails: new Thumbnails([new Thumbnail(playlist.artwork_url, HARDCODED_THUMBNAIL_QUALITY)]),
+        author: new PlatformAuthorLink(new PlatformID(PLATFORM, playlist.user.id.toString(), plugin.config.id), playlist.user.username, playlist.user.permalink_url, playlist.user.avatar_url, playlist.user.followers_count),
+        datetime: playlist.kind === "playlist"
+            ? date_to_unix_seconds(playlist.last_modified)
+            : playlist.last_updated !== null
+                ? date_to_unix_seconds(playlist.last_updated)
+                : Date.now() / 1000,
+        url: playlist.permalink_url,
+        videoCount: playlist.kind === "playlist" ? playlist.track_count : playlist.tracks.length,
+        thumbnail: playlist.artwork_url
+    });
+}
+//#endregion
+//#region search
+function searchSuggestions(query) {
+    const url = new URL(`${API_URL}search/queries`);
+    url.searchParams.set("q", query);
+    url.searchParams.set("client_id", local_state.client_id);
+    url.searchParams.set("limit", (10).toString());
+    url.searchParams.set("offset", (0).toString());
+    url.searchParams.set("linked_partitioning", (1).toString());
+    url.searchParams.set("app_version", local_state.app_version.toString());
+    url.searchParams.set("app_locale", APP_LOCALE);
+    const resp = local_http.GET(url.toString(), {}, false);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const suggestions_response = JSON.parse(resp.body);
+    return suggestions_response.collection.map((item) => item.query);
+}
+function getSearchCapabilities() {
+    return new ResultCapabilities([Type.Feed.Mixed, Type.Feed.Videos], [], [new FilterGroup("Duration", [
+            new FilterCapability("< 2 min" /* DurationOptions.less_than_two */, "< 2 min" /* DurationOptions.less_than_two */, "< 2 min" /* DurationOptions.less_than_two */),
+            new FilterCapability("2-10 min" /* DurationOptions.two_to_ten */, "2-10 min" /* DurationOptions.two_to_ten */, "2-10 min" /* DurationOptions.two_to_ten */),
+            new FilterCapability("10-30 min" /* DurationOptions.ten_to_thirty */, "10-30 min" /* DurationOptions.ten_to_thirty */, "10-30 min" /* DurationOptions.ten_to_thirty */),
+            new FilterCapability("> 30 min" /* DurationOptions.more_than_thirty */, "> 30 min" /* DurationOptions.more_than_thirty */, "> 30 min" /* DurationOptions.more_than_thirty */),
+        ], false, "DURATION_FILTER"),
+        new FilterGroup("Upload Date", [
+            new FilterCapability("Last hour" /* DateOptions.last_hour */, "Last hour" /* DateOptions.last_hour */, "Last hour" /* DateOptions.last_hour */),
+            new FilterCapability("Today" /* DateOptions.today */, "Today" /* DateOptions.today */, "Today" /* DateOptions.today */),
+            new FilterCapability("This week" /* DateOptions.this_week */, "This week" /* DateOptions.this_week */, "This week" /* DateOptions.this_week */),
+            new FilterCapability("This month" /* DateOptions.this_month */, "This month" /* DateOptions.this_month */, "This month" /* DateOptions.this_month */),
+            new FilterCapability("This year" /* DateOptions.this_year */, "This year" /* DateOptions.this_year */, "This year" /* DateOptions.this_year */),
+        ], false, "DATE_FILTER"),
+        new FilterGroup("Usage Purpose", [
+            new FilterCapability("To modify commercially" /* LicenseOptions.modify_commercially */, "To modify commercially" /* LicenseOptions.modify_commercially */, "To modify commercially" /* LicenseOptions.modify_commercially */),
+            new FilterCapability("To use commercially" /* LicenseOptions.use_commercially */, "To use commercially" /* LicenseOptions.use_commercially */, "To use commercially" /* LicenseOptions.use_commercially */),
+            new FilterCapability("To share" /* LicenseOptions.share */, "To share" /* LicenseOptions.share */, "To share" /* LicenseOptions.share */),
+        ], false, "LICENSE_FILTER")]);
+}
+function search(query, _type, order, filters) {
+    if (order !== null) {
+        throw new ScriptException("unreachable");
+    }
+    if (filters === null) {
+        throw new ScriptException("TODO");
+    }
+    const sc_filters = {
+        date: (() => {
+            const date_filter = filters.DATE_FILTER?.[0];
+            switch (date_filter) {
+                case "Last hour" /* DateOptions.last_hour */:
+                    return "last_hour";
+                case "Today" /* DateOptions.today */:
+                    return "last_day";
+                case "This week" /* DateOptions.this_week */:
+                    return "last_week";
+                case "This month" /* DateOptions.this_month */:
+                    return "last_month";
+                case "This year" /* DateOptions.this_year */:
+                    return "last_year";
+                case undefined:
+                    return undefined;
                 default:
-                    if (IS_TESTING) console.log("Soundcloud search result: " + JSON.stringify(result));
-                    throw new ScriptException("Unknown kind: " + result.kind);
+                    throw assert_exhaustive(date_filter, "unreachable");
             }
-        }
-        return results;
+        })(),
+        duration: (() => {
+            const duration_filter = filters.DURATION_FILTER?.[0];
+            switch (duration_filter) {
+                case "< 2 min" /* DurationOptions.less_than_two */:
+                    return "short";
+                case "2-10 min" /* DurationOptions.two_to_ten */:
+                    return "medium";
+                case "10-30 min" /* DurationOptions.ten_to_thirty */:
+                    return "long";
+                case "> 30 min" /* DurationOptions.more_than_thirty */:
+                    return "epic";
+                case undefined:
+                    return undefined;
+                default:
+                    throw assert_exhaustive(duration_filter, "unreachable");
+            }
+        })(),
+        license: (() => {
+            const license_filter = filters.LICENSE_FILTER?.[0];
+            switch (license_filter) {
+                case "To modify commercially" /* LicenseOptions.modify_commercially */:
+                    return "to_modify_commercially";
+                case "To use commercially" /* LicenseOptions.use_commercially */:
+                    return "to_use_commercially";
+                case "To share" /* LicenseOptions.share */:
+                    return "to_share";
+                case undefined:
+                    return undefined;
+                default:
+                    throw assert_exhaustive(license_filter, "unreachable");
+            }
+        })()
+    };
+    return new TrackSearchPager(query, 20, 0, sc_filters);
+}
+function search_tracks(query, limit, offset, filters) {
+    const url = new URL(`${API_URL}search/tracks`);
+    url.searchParams.set("q", query);
+    url.searchParams.set("client_id", local_state.client_id);
+    url.searchParams.set("limit", limit.toString());
+    url.searchParams.set("offset", offset.toString());
+    url.searchParams.set("linked_partitioning", (1).toString());
+    url.searchParams.set("app_version", local_state.app_version.toString());
+    url.searchParams.set("app_locale", APP_LOCALE);
+    if (filters.date !== undefined) {
+        url.searchParams.set("filter.created_at", filters.date);
     }
-
-    /**
-     * Returns a new instance of the next page of results
-     * @returns {SearchPagerVideos} - The next page instance
-     */
+    if (filters.duration !== undefined) {
+        url.searchParams.set("filter.duration", filters.duration);
+    }
+    if (filters.license !== undefined) {
+        url.searchParams.set("filter.license", filters.license);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const search_response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
+    return search_response;
+}
+function filter_tracks(track) {
+    return !local_settings.hide_premium_content || !is_premium(track) || local_state.is_premium;
+}
+class TrackSearchPager extends VideoPager {
+    next_href;
+    constructor(query, limit, offset, filters) {
+        const response = search_tracks(query, limit, offset, filters);
+        const results = response.collection.filter(filter_tracks).map(sound_cloud_track_to_platform_video);
+        super(results, response.next_href !== undefined);
+        this.next_href = response.next_href;
+    }
     nextPage() {
-        return new SearchPagerVideos({ ...this.context, page: this.context.page + 1 });
+        if (this.next_href === undefined) {
+            throw new ScriptException("unreachable");
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const search_response = JSON.parse(local_http.GET(this.next_href, {}, true).body);
+        this.results = search_response.collection.filter(filter_tracks).map((user) => sound_cloud_track_to_platform_video(user));
+        this.hasMore = search_response.next_href !== undefined;
+        this.next_href = search_response.next_href;
+        return this;
     }
+    hasMorePagers() {
+        return this.hasMore;
+    }
+}
+function searchChannels(query) {
+    return new SoundCloudChannelPager(query, 20, 0);
+}
+class SoundCloudChannelPager extends ChannelPager {
+    next_href;
+    constructor(query, limit, offset) {
+        const response = search_channels(query, limit, offset);
+        const results = response.collection.map((user) => sound_cloud_user_to_platform_channel(user));
+        super(results, response.next_href !== undefined);
+        this.next_href = response.next_href;
+    }
+    nextPage() {
+        if (this.next_href === undefined) {
+            throw new ScriptException("unreachable");
+        }
+        const url = new URL(this.next_href);
+        url.searchParams.set("client_id", local_state.client_id);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const search_response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
+        this.results = search_response.collection.map((user) => sound_cloud_user_to_platform_channel(user));
+        this.hasMore = search_response.next_href !== undefined;
+        this.next_href = search_response.next_href;
+        return this;
+    }
+    hasMorePagers() {
+        return this.hasMore;
+    }
+}
+function search_channels(query, limit, offset) {
+    const url = new URL(`${API_URL}search/users`);
+    url.searchParams.set("q", query);
+    url.searchParams.set("client_id", local_state.client_id);
+    url.searchParams.set("limit", limit.toString());
+    url.searchParams.set("offset", offset.toString());
+    url.searchParams.set("linked_partitioning", (1).toString());
+    url.searchParams.set("app_version", local_state.app_version.toString());
+    url.searchParams.set("app_locale", APP_LOCALE);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const search_response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
+    return search_response;
+}
+//#endregion
+//#region channel
+function isChannelUrl(url) {
+    // see if it matches https://soundcloud.com/nfrealmusic
+    return !isPlaylistUrl(url) && REGEX_CHANNEL.test(url);
+}
+function getChannel(url) {
+    const html = local_http.GET(url, {}, false).body;
+    const matched = html.match(HYDRATION_REGEX);
+    if (!matched?.[1]) {
+        throw new ScriptException('Could not find channel info');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const hydration_data = JSON.parse(matched[1]);
+    const user_hydration = hydration_data.find(hydration_item => hydration_item.hydratable === "user");
+    if (user_hydration === undefined) {
+        throw new ScriptException('Could not find channel info');
+    }
+    const platform_channel = sound_cloud_user_to_platform_channel(user_hydration.data);
+    return platform_channel;
+}
+function getChannelContents(url) {
+    return new ChannelVideoPager(url, 20, 0);
+}
+function load_user(url) {
+    const html = local_http.GET(url, {}, false).body;
+    const matched = html.match(HYDRATION_REGEX);
+    if (!matched?.[1]) {
+        throw new ScriptException('Could not find channel info');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const hydration_data = JSON.parse(matched[1]);
+    const user_hydration = hydration_data.find(hydration_item => hydration_item.hydratable === "user");
+    if (user_hydration === undefined) {
+        throw new ScriptException('Could not find channel info');
+    }
+    return user_hydration.data;
 }
 class ChannelVideoPager extends VideoPager {
-    /**
-     * @param {import("./types.d.ts").ChannelVideoPagerContext} context
-     */
-    constructor(context) {
-        if (!context.id) {
-            const resp = callUrl(context.url)
-            const matched = resp.body.match(/window\.__sc_hydration = (.+);/)
-            if (!matched) {
-                throw new ScriptException('Could not find channel info')
-            }
-
-            /** @type {import("./types").SCHydration[]} */
-            const json = JSON.parse(matched[1])
-
-            for (let object of json) {
-                if (object.hydratable === 'user') {
-                    /** @type {import("./types").SoundcloudUser} */
-                    const data = object.data
-
-                    context.id = data.id
-                    break
-                }
-            }
+    next_href;
+    constructor(url, limit, offset) {
+        const user = load_user(url);
+        const tracks_url = new URL(`${API_URL}users/${user.id.toString()}/tracks`);
+        tracks_url.searchParams.set("client_id", local_state.client_id);
+        tracks_url.searchParams.set("limit", limit.toString());
+        tracks_url.searchParams.set("offset", offset.toString());
+        tracks_url.searchParams.set("linked_partitioning", (1).toString());
+        tracks_url.searchParams.set("app_version", local_state.app_version.toString());
+        tracks_url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(tracks_url.toString(), {}, true).body);
+        const videos = response.collection.filter(filter_tracks).map((track) => sound_cloud_track_to_platform_video(track));
+        super(videos, response.next_href !== null);
+        this.next_href = response.next_href;
+    }
+    nextPage() {
+        if (this.next_href === null) {
+            throw new ScriptException("unreachable");
         }
-
-        const url = `${API_URL}users/${context.id}/tracks?representation=&client_id=${CLIENT_ID}&limit=${context.page_size}&offset=${context.offset_date}&linked_partitioning=1${URL_ADDITIVE}`
-
-        if(IS_TESTING)
-            console.log('Soundcloud channel url: ' + url)
-
-        const resp = callUrl(url)
-        const parsed = JSON.parse(resp.body)
-
-        /** @type {import("./types").SoundcloudTrack[]} */
-        const tracks = parsed['collection']
-
-        const videos = tracks.map((track) => soundcloudTrackToPlatformVideo(track))
-
-        context['offset_date'] = tracks[tracks.length - 1]?.created_at
-
-        super(videos, tracks.length > 0, context)
+        const url = new URL(this.next_href);
+        url.searchParams.set("client_id", local_state.client_id);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
+        this.results = response.collection.filter(filter_tracks).map((track) => sound_cloud_track_to_platform_video(track));
+        this.hasMore = response.next_href !== null;
+        return this;
     }
-
-    nextPage() {
-        this.context.page = this.context.page + 1
-        return new ChannelVideoPager(this.context)
+    hasMorePagers() {
+        return this.hasMore;
     }
 }
-class SearchPagerChannels extends ChannelPager {
-    /**
-     * @param {import("./types").SearchContext} context the query params
-     */
-    constructor(context) {
-        const limit = context.page_size
-        const offset = (context.page - 1) * limit
-        const url = `${API_URL}search/users?q=${context.q}&client_id=${CLIENT_ID}&limit=${limit}&offset=${offset}&linked_partitioning=1${URL_ADDITIVE}`
-
-        const resp = callUrl(url)
-
-        /** @type {SearchResponse} */
-        const json = JSON.parse(resp.body)
-
-        /** @type {SoundcloudUser[]} */
-        const users = json['collection']
-
-        const results = users.map((user) => soundcloudUserToPlatformChannel(user))
-
-        super(results, results.length >= context.page_size, context)
-    }
-
-    nextPage() {
-        this.context.page = this.context.page + 1
-        return new SearchPagerChannels(this.context)
-    }
+function getChannelPlaylists(url) {
+    const channel_slug = extract_sound_cloud_id(url);
+    const user = load_user(`${URL_BASE}/${channel_slug}`);
+    const author = new PlatformAuthorLink(new PlatformID(PLATFORM, user.id.toString(), plugin.config.id), user.username, user.permalink_url, user.avatar_url, user.followers_count);
+    const likes_playlist = new PlatformPlaylist({
+        id: new PlatformID(PLATFORM, "likes", plugin.config.id),
+        author: author,
+        name: "Liked Tracks",
+        thumbnail: user.avatar_url,
+        url: `https://soundcloud.com/${channel_slug}/likes`,
+    });
+    return new UserPlaylistsPager(user.id, 10, 0, likes_playlist);
 }
-class ExtendableCommentPager extends CommentPager {
-    /**
-     * @param {import("./types.d.ts").HomeContext & {url: string; id: number|null}} context
-     */
-    constructor(context) {
-        if (!context.id) {
-            const resp = callUrl(context.url)
-            const html = resp.body
-            const matched = html.match(/window\.__sc_hydration = (.+);/)
-            if (!matched) {
-                throw new ScriptException('Could not find comment info')
-            }
-
-            /** @type {import("./types").SCHydration[]} */
-            const json = JSON.parse(matched[1])
-
-            for (let object of json) {
-                if (object.hydratable === 'sound') {
-                    /** @type {import("./types").SoundcloudTrack} */
-                    const data = object.data
-
-                    context.id = data.id
-                    break
-                }
-            }
+class UserPlaylistsPager extends PlaylistPager {
+    albums_next_href;
+    playlists_next_href;
+    constructor(user_id, limit, offset, likes_playlist) {
+        const albums_url = new URL(`${API_URL}users/${user_id.toString()}/albums`);
+        albums_url.searchParams.set("client_id", local_state.client_id);
+        albums_url.searchParams.set("limit", limit.toString());
+        albums_url.searchParams.set("offset", offset.toString());
+        albums_url.searchParams.set("linked_partitioning", (1).toString());
+        albums_url.searchParams.set("app_version", local_state.app_version.toString());
+        albums_url.searchParams.set("app_locale", APP_LOCALE);
+        const playlists_url = new URL(`${API_URL}users/${user_id.toString()}/playlists_without_albums`);
+        playlists_url.searchParams.set("client_id", local_state.client_id);
+        playlists_url.searchParams.set("limit", limit.toString());
+        playlists_url.searchParams.set("offset", offset.toString());
+        playlists_url.searchParams.set("linked_partitioning", (1).toString());
+        playlists_url.searchParams.set("app_version", local_state.app_version.toString());
+        playlists_url.searchParams.set("app_locale", APP_LOCALE);
+        const responses = local_http.batch().GET(albums_url.toString(), {}, false).GET(playlists_url.toString(), {}, false).execute();
+        if (responses[0] === undefined || responses[1] === undefined) {
+            throw new ScriptException("unreachable");
         }
-
-        // https://api-v2.soundcloud.com/tracks/1506477625/comments?sort=newest&threaded=1&client_id=TihN0nuDfhghD9GVPbTtrSEa558lYo4V&limit=20&offset=0&linked_partitioning=1&app_version=1684153290&app_locale=en
-        const limit = context.page_size
-        const offset = (context.page - 1) * limit
-
-        const url = `${API_URL}tracks/${context.id}/comments?sort=newest&threaded=1&client_id=${CLIENT_ID}&limit=${limit}&offset=${offset}&linked_partitioning=1${URL_ADDITIVE}`
-
-        const resp = callUrl(url)
-
-        /** @type {import("./types").CommentResponse} */
-        const json = JSON.parse(resp.body)
-
-        const comments = json['collection'].map((comment) => {
-            return new Comment({
-                contextUrl: context.url,
-                author: new PlatformAuthorLink(
-                    new PlatformID(PLATFORM, comment.user.id.toString(), config.id, PLATFORM_CLAIMTYPE),
-                    comment.user.username,
-                    comment.user.permalink_url,
-                    comment.user.avatar_url
-                ),
-                message: comment.body,
-                rating: new RatingLikes(0),
-                date: parseInt(new Date(comment.created_at).getTime() / 1000),
-                replyCount: 0,
-                context: null,
-            })
-        })
-
-        super(comments, json['next_href'] !== null, context)
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const albums_response = JSON.parse(responses[0].body);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const playlists_response = JSON.parse(responses[1].body);
+        super(interleave([
+            [likes_playlist],
+            albums_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist))),
+            playlists_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist)))
+        ]), albums_response.next_href !== null || playlists_response.next_href !== null);
+        this.albums_next_href = albums_response.next_href;
+        this.playlists_next_href = playlists_response.next_href;
     }
-
     nextPage() {
-        this.context.page = this.context.page + 1
-        return new ExtendableCommentPager(this.context)
+        if (!this.hasMore) {
+            this.results = [];
+            return this;
+        }
+        if (this.albums_next_href !== null && this.playlists_next_href !== null) {
+            const albums_url = new URL(this.albums_next_href);
+            albums_url.searchParams.set("client_id", local_state.client_id);
+            const playlists_url = new URL(this.playlists_next_href);
+            playlists_url.searchParams.set("client_id", local_state.client_id);
+            const responses = local_http.batch().GET(albums_url.toString(), {}, false).GET(playlists_url.toString(), {}, false).execute();
+            if (responses[0] === undefined || responses[1] === undefined) {
+                throw new ScriptException("unreachable");
+            }
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            const albums_response = JSON.parse(responses[0].body);
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            const playlists_response = JSON.parse(responses[1].body);
+            this.results = interleave([
+                albums_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist))),
+                playlists_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist)))
+            ]);
+            this.hasMore = albums_response.next_href !== null || playlists_response.next_href !== null;
+            this.playlists_next_href = playlists_response.next_href;
+            this.albums_next_href = albums_response.next_href;
+        }
+        else if (this.albums_next_href !== null) {
+            const albums_url = new URL(this.albums_next_href);
+            albums_url.searchParams.set("client_id", local_state.client_id);
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            const albums_response = JSON.parse(local_http.GET(albums_url.toString(), {}, false).body);
+            this.results = albums_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist)));
+            this.hasMore = albums_response.next_href !== null;
+            this.albums_next_href = albums_response.next_href;
+        }
+        else if (this.playlists_next_href !== null) {
+            const playlists_url = new URL(this.playlists_next_href);
+            playlists_url.searchParams.set("client_id", local_state.client_id);
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            const playlists_response = JSON.parse(local_http.GET(playlists_url.toString(), {}, false).body);
+            this.results = playlists_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist)));
+            this.hasMore = playlists_response.next_href !== null;
+            this.playlists_next_href = playlists_response.next_href;
+        }
+        else {
+            throw new ScriptException("unreachable");
+        }
+        return this;
+    }
+    hasMorePagers() {
+        return this.hasMore;
     }
 }
-
-//* CONVERTERS
-/**
- * Convert a Soundcloud person to a PlatformChannel
- * @param { import("./types").SoundcloudUser } scu
- * @returns { PlatformChannel }
- */
-function soundcloudUserToPlatformChannel(scu) {
-    if (!scu || typeof scu !== 'object') {
-        throw new ScriptException('Invalid SoundCloud user object');
+//#endregion
+//#region content
+function isContentDetailsUrl(url) {
+    // https://soundcloud.com/toosii2x/toosii-favorite-song
+    return !isPlaylistUrl(url) && REGEX_TRACK.test(url);
+}
+function getContentDetails(url) {
+    const html = local_http.GET(url, {}, true).body;
+    const matched = html.match(HYDRATION_REGEX);
+    if (!matched?.[1]) {
+        throw new ScriptException('Could not find track info');
     }
-
-    const visuals = scu.visuals?.visuals || [];
-    const banner = visuals?.[0]?.visual_url || '';
-    const links = visuals.map(v => v.link).filter(Boolean);
-
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const hydration_data = JSON.parse(matched[1]);
+    const sound_hydration = hydration_data.find(hydration_item => hydration_item.hydratable === "sound");
+    if (sound_hydration === undefined) {
+        throw new ScriptException('Could not find track info');
+    }
+    const sct = sound_hydration.data;
+    // Exclude opus codec completely, regardless of protocol since it's not well supported
+    // we've had playback issues in the past
+    const filtered_transcodings = sct.media.transcodings.filter(transcoding => !transcoding.preset.includes("opus"));
+    const high_progressive = filtered_transcodings.find(transcoding => transcoding.quality === "hq" && transcoding.format.protocol === "progressive");
+    const high_hls = filtered_transcodings.find(transcoding => transcoding.quality === "hq" && transcoding.format.protocol === "hls");
+    const standard_progressive = filtered_transcodings.find(transcoding => transcoding.quality === "sq" && transcoding.format.protocol === "progressive");
+    const standard_hls = filtered_transcodings.find(transcoding => transcoding.quality === "sq" && transcoding.format.protocol === "hls");
+    const selected_transcoding = (() => {
+        switch (local_settings.preferred_protocol) {
+            case 0 /* Protocol.Progressive */:
+                if (high_progressive !== undefined) {
+                    return high_progressive;
+                }
+                else if (high_hls !== undefined) {
+                    return high_hls;
+                }
+                else if (standard_progressive !== undefined) {
+                    return standard_progressive;
+                }
+                else if (standard_hls !== undefined) {
+                    return standard_hls;
+                }
+                throw new ScriptException("unable to find media source");
+            case 1 /* Protocol.HLS */:
+                if (high_progressive !== undefined) {
+                    return high_progressive;
+                }
+                else if (high_hls !== undefined) {
+                    return high_hls;
+                }
+                else if (standard_progressive !== undefined) {
+                    return standard_progressive;
+                }
+                else if (standard_hls !== undefined) {
+                    return standard_hls;
+                }
+                throw new ScriptException("unable to find media source");
+            default:
+                throw assert_exhaustive(local_settings.preferred_protocol, "unhandled protocol type");
+        }
+    })();
+    const media_url = new URL(selected_transcoding.url);
+    media_url.searchParams.append('client_id', local_state.client_id);
+    media_url.searchParams.append('track_authorization', sct.track_authorization);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const response = JSON.parse(local_http.GET(media_url.toString(), {}, true).body);
+    const source = (() => {
+        switch (selected_transcoding.format.protocol) {
+            case "progressive": {
+                const { container, codec } = extract_container_and_codec(selected_transcoding.format.mime_type);
+                return new AudioUrlSource({
+                    name: selected_transcoding.preset,
+                    duration: Math.round(selected_transcoding.duration / 1000),
+                    url: response.url,
+                    container,
+                    codec,
+                    language: Language.UNKNOWN,
+                    bitrate: HARDCODED_ZERO,
+                });
+            }
+            case "hls":
+                return new HLSSource({
+                    name: selected_transcoding.preset,
+                    duration: Math.round(selected_transcoding.duration / 1000),
+                    url: response.url,
+                    language: Language.UNKNOWN
+                });
+            default:
+                throw assert_exhaustive(selected_transcoding.format.protocol, "unreachable");
+        }
+    })();
+    return new PlatformVideoDetails({
+        id: new PlatformID(PLATFORM, sct.id.toString(), plugin.config.id),
+        name: sct.title,
+        thumbnails: new Thumbnails([new Thumbnail(sct.artwork_url ?? sct.user.avatar_url.replace("large", "t500x500"), HARDCODED_THUMBNAIL_QUALITY)]),
+        author: new PlatformAuthorLink(new PlatformID(PLATFORM, sct.user_id.toString(), plugin.config.id), sct.user.username, sct.user.permalink_url, sct.user.avatar_url),
+        datetime: date_to_unix_seconds(sct.display_date),
+        url: sct.permalink_url,
+        duration: Math.round(sct.duration / 1000),
+        viewCount: sct.playback_count,
+        isLive: false,
+        shareUrl: sct.permalink_url,
+        description: sct.description,
+        video: new UnMuxVideoSourceDescriptor([], [source]),
+        rating: new RatingLikes(sct.likes_count),
+        getContentRecommendations: () => {
+            return getContentRecommendations(sct.permalink_url);
+        }
+    });
+}
+function getContentRecommendations(url) {
+    const track_id = extract_track_id(url);
+    return new RelatedTracksPager(track_id, 10, 0);
+}
+class RelatedTracksPager extends VideoPager {
+    next_href;
+    constructor(track_id, limit, offset) {
+        const related_tracks_url = new URL(`${API_URL}tracks/${track_id.toString()}/related`);
+        related_tracks_url.searchParams.set("client_id", local_state.client_id);
+        related_tracks_url.searchParams.set("limit", limit.toString());
+        related_tracks_url.searchParams.set("offset", offset.toString());
+        related_tracks_url.searchParams.set("linked_partitioning", (1).toString());
+        related_tracks_url.searchParams.set("app_version", local_state.app_version.toString());
+        related_tracks_url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(related_tracks_url.toString(), {}, false).body);
+        super(response.collection.map(track => sound_cloud_track_to_platform_video(track)), response.next_href !== null);
+        this.next_href = response.next_href;
+    }
+    nextPage() {
+        if (this.next_href === null) {
+            throw new ScriptException("unreachable");
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(this.next_href.toString(), {}, false).body);
+        this.results = response.collection.map(track => sound_cloud_track_to_platform_video(track));
+        this.hasMore = response.next_href !== null;
+        this.next_href = response.next_href;
+        return this;
+    }
+    hasMorePagers() {
+        return this.hasMore;
+    }
+}
+function getComments(url) {
+    const track_id = extract_track_id(url);
+    return new SoundCloudCommentPager(url, track_id, 20, 0);
+}
+// interestingly SoundCloud renders comments as subcomments if the track timestamp tagged on the comment matches a previously posted comment
+class SoundCloudCommentPager extends CommentPager {
+    track_url;
+    next_href;
+    constructor(track_url, track_id, limit, offset) {
+        const url = new URL(`${API_URL}tracks/${track_id.toString()}/comments`);
+        url.searchParams.set("client_id", local_state.client_id);
+        url.searchParams.set("offset", offset.toString());
+        url.searchParams.set("threaded", (1).toString());
+        url.searchParams.set("sort", "newest");
+        url.searchParams.set("limit", limit.toString());
+        url.searchParams.set("app_version", local_state.app_version.toString());
+        url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(url.toString(), {}, false).body);
+        super(format_comments(track_url, response), response.next_href !== null);
+        this.track_url = track_url;
+        this.next_href = response.next_href;
+    }
+    nextPage() {
+        if (this.next_href === null) {
+            throw new ScriptException("unreachable");
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(this.next_href, {}, false).body);
+        this.results = format_comments(this.track_url, response);
+        this.hasMore = response.next_href !== null;
+        this.next_href = response.next_href;
+        return this;
+    }
+    hasMorePagers() {
+        return this.hasMore;
+    }
+}
+function format_comments(track_url, response) {
+    const comments = [];
+    const sub_comments_map = new Map();
+    for (const comment of response.collection) {
+        const sub_comments = sub_comments_map.get(comment.timestamp);
+        if (sub_comments === undefined) {
+            sub_comments_map.set(comment.timestamp, []);
+            comments.push(comment);
+        }
+        else {
+            sub_comments.push(comment);
+        }
+    }
+    return comments.map(comment => {
+        return format_comment(track_url, comment, sub_comments_map.get(comment.timestamp) ?? []);
+    });
+}
+function format_comment(track_url, comment, replies) {
+    const get_replies = () => {
+        return new CommentPager(replies.map(sub_comment => format_comment(track_url, sub_comment, [])), false);
+    };
+    const pt = new PlatformComment({
+        contextUrl: track_url,
+        author: new PlatformAuthorLink(new PlatformID(PLATFORM, comment.user.id.toString(), plugin.config.id), comment.user.username, comment.user.permalink_url, comment.user.avatar_url, comment.user.followers_count),
+        message: comment.body,
+        // likes are available through a GraphQL api however it looks like there must be a separate request per user to get the likes for their comments specifically which would be a number of requests  
+        // rating: new RatingLikes()
+        date: date_to_unix_seconds(comment.created_at),
+        replyCount: replies.length,
+        getReplies: get_replies
+    });
+    // @ts-expect-error TODO remove once source.js changes are live
+    pt.getReplies = get_replies;
+    return pt;
+}
+//#endregion
+//#region user
+function getUserSubscriptions() {
+    const html = local_http.GET("https://soundcloud.com/you/following", {}, true).body;
+    const matched = html.match(HYDRATION_REGEX);
+    if (matched?.[1] === undefined) {
+        throw new ScriptException('Could not find user info');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const hydration_data = JSON.parse(matched[1]);
+    const user_hydration = hydration_data.find(hydration_item => hydration_item.hydratable === "meUser");
+    if (user_hydration === undefined) {
+        throw new ScriptException('Could not find user info');
+    }
+    const url = new URL(`${API_URL}users/${user_hydration.data.id.toString()}/followings`);
+    url.searchParams.set("client_id", local_state.client_id);
+    url.searchParams.set("limit", (12).toString());
+    url.searchParams.set("offset", (0).toString());
+    url.searchParams.set("linked_partitioning", (1).toString());
+    url.searchParams.set("app_version", local_state.app_version.toString());
+    url.searchParams.set("app_locale", APP_LOCALE);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    let response = JSON.parse(local_http.GET(url.toString(), {}, false).body);
+    const subscriptions = response.collection.map(user => user.permalink_url);
+    while (response.next_href) {
+        const url = new URL(response.next_href);
+        url.searchParams.set("client_id", local_state.client_id);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        response = JSON.parse(local_http.GET(url.toString(), {}, false).body);
+        subscriptions.push(...response.collection.map(user => user.permalink_url));
+    }
+    return subscriptions;
+}
+function getUserPlaylists() {
+    // https://api-v2.soundcloud.com/me/library/all?client_id=AXHkknI02RnaQ0vVJ3FK3pVcoToTlmFK&limit=10&offset=0&linked_partitioning=1&app_version=1746717941&app_locale=en
+    // https://api-v2.soundcloud.com/users/138758236/track_likes?client_id=AXHkknI02RnaQ0vVJ3FK3pVcoToTlmFK&limit=24&offset=0&linked_partitioning=1&app_version=1746717941&app_locale=en
+    const url = new URL(`${API_URL}me/library/all`);
+    url.searchParams.set("client_id", local_state.client_id);
+    url.searchParams.set("limit", (10).toString());
+    url.searchParams.set("offset", (0).toString());
+    url.searchParams.set("linked_partitioning", (1).toString());
+    url.searchParams.set("app_version", local_state.app_version.toString());
+    url.searchParams.set("app_locale", APP_LOCALE);
+    const response = local_http.batch()
+        .GET("https://soundcloud.com/you/following", {}, true)
+        .GET(url.toString(), {}, true)
+        .execute();
+    if (response[0] === undefined || response[1] === undefined) {
+        throw new ScriptException("unreachable");
+    }
+    const html = response[0].body;
+    const matched = html.match(HYDRATION_REGEX);
+    if (matched?.[1] === undefined) {
+        throw new ScriptException("Could not find user info");
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const hydration_data = JSON.parse(matched[1]);
+    const user_hydration = hydration_data.find(hydration_item => hydration_item.hydratable === "meUser");
+    if (user_hydration === undefined) {
+        throw new ScriptException("Could not find user info");
+    }
+    const playlists = [`https://soundcloud.com/${user_hydration.data.permalink}/likes`];
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    let library_response = JSON.parse(response[1].body);
+    while (library_response.next_href !== null) {
+        const url = new URL(library_response.next_href);
+        url.searchParams.set("client_id", local_state.client_id);
+        playlists.push(...library_response.collection.map((playlist) => playlist.type !== "system-playlist-like" ? playlist.playlist.permalink_url : playlist.system_playlist.permalink_url));
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        library_response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
+    }
+    return playlists;
+}
+// TODO add playback tracking
+// SoundCloud sends play and pause actions to this endpoint 
+// https://api-v2.soundcloud.com/me
+// that info gets used to generate user history
+// https://soundcloud.com/you/history
+// function getPlaybackTracker(url: string): SoundCloudPlaybackTracker {
+//     return new SoundCloudPlaybackTracker(url)
+// }
+// class SoundCloudPlaybackTracker extends PlaybackTracker {
+//     constructor(url: string) {
+//         console.log(url)
+//         super(1000)
+//     }
+// }
+//#endregion
+//#region playlist
+function isPlaylistUrl(url) {
+    return is_sound_cloud_playlist_url(url);
+}
+class LikesPlaylistContentsPager extends VideoPager {
+    next_href;
+    constructor(user_id) {
+        const likes_url = new URL(`${API_URL}users/${user_id.toString()}/likes`);
+        likes_url.searchParams.set("client_id", local_state.client_id);
+        likes_url.searchParams.set("limit", (24).toString());
+        likes_url.searchParams.set("offset", (0).toString());
+        likes_url.searchParams.set("linked_partitioning", (1).toString());
+        likes_url.searchParams.set("app_version", local_state.app_version.toString());
+        likes_url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(likes_url.toString(), {}, false).body);
+        super(response.collection.filter(item => "track" in item).map(item => sound_cloud_track_to_platform_video(item.track)), response.next_href !== null);
+        this.next_href = response.next_href;
+    }
+    nextPage() {
+        if (this.next_href === null) {
+            throw new ScriptException("unreachable");
+        }
+        const url = new URL(this.next_href);
+        url.searchParams.set("client_id", local_state.client_id);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(url.toString(), {}, false).body);
+        this.results = response.collection.filter(item => "track" in item).map(item => sound_cloud_track_to_platform_video(item.track));
+        this.hasMore = response.next_href !== null;
+        this.next_href = response.next_href;
+        return this;
+    }
+    hasMorePagers() {
+        return this.hasMore;
+    }
+}
+function get_likes_playlist(url) {
+    const html = local_http.GET(url, {}, false).body;
+    const matched = html.match(HYDRATION_REGEX);
+    if (matched?.[1] === undefined) {
+        throw new ScriptException("Could not find playlist info");
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const hydration_data = JSON.parse(matched[1]);
+    const user_hydration = hydration_data.find(hydration_item => hydration_item.hydratable === "user");
+    if (user_hydration === undefined) {
+        throw new ScriptException("Could not find playlist info");
+    }
+    return new PlatformPlaylistDetails({
+        id: new PlatformID(PLATFORM, `${user_hydration.data.permalink}/likes`, plugin.config.id),
+        name: `Likes by ${user_hydration.data.username}`,
+        thumbnails: new Thumbnails([new Thumbnail(user_hydration.data.avatar_url, HARDCODED_THUMBNAIL_QUALITY)]),
+        author: new PlatformAuthorLink(new PlatformID(PLATFORM, user_hydration.data.id.toString(), plugin.config.id), user_hydration.data.username, user_hydration.data.permalink_url, user_hydration.data.avatar_url, user_hydration.data.followers_count),
+        url,
+        thumbnail: user_hydration.data.avatar_url,
+        contents: new LikesPlaylistContentsPager(user_hydration.data.id)
+    });
+}
+function getPlaylist(url) {
+    if (is_sound_cloud_likes_playlist(url)) {
+        return get_likes_playlist(url);
+    }
+    const response = local_http.GET(url, {}, true);
+    if (response.code === 404) {
+        if (bridge.isLoggedIn()) {
+            throw new ScriptException("Playlist doesn't exist");
+        }
+        else {
+            throw new LoginRequiredException("Login to view this playlist");
+        }
+    }
+    const html = response.body;
+    const matched = html.match(HYDRATION_REGEX);
+    if (matched?.[1] === undefined) {
+        throw new ScriptException("Could not find playlist info");
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const hydration_data = JSON.parse(matched[1]);
+    const playlist_hydration = hydration_data.find(hydration_item => hydration_item.hydratable === "playlist");
+    const system_playlist_hydration = hydration_data.find(hydration_item => hydration_item.hydratable === "systemPlaylist");
+    if (playlist_hydration === undefined) {
+        if (system_playlist_hydration === undefined) {
+            throw new ScriptException("Could not find playlist info");
+        }
+        return new PlatformPlaylistDetails(sound_cloud_playlist_to_platform_playlist_details_def(system_playlist_hydration.data));
+    }
+    return new PlatformPlaylistDetails(sound_cloud_playlist_to_platform_playlist_details_def(playlist_hydration.data));
+}
+function searchPlaylists(query) {
+    return new PlaylistSearchResultsPager(query, 20, 0);
+}
+class PlaylistSearchResultsPager extends PlaylistPager {
+    playlists_next_href;
+    albums_next_href;
+    constructor(query, limit, offset) {
+        const playlists_url = search_playlists_url(query, limit, offset);
+        const albums_url = search_albums_url(query, limit, offset);
+        const responses = local_http
+            .batch()
+            .GET(playlists_url.toString(), {}, false)
+            .GET(albums_url.toString(), {}, false)
+            .execute();
+        if (responses[0] === undefined || responses[1] === undefined) {
+            throw new ScriptException("unreachable");
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const playlists_response = JSON.parse(responses[0].body);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const albums_response = JSON.parse(responses[1].body);
+        const results = interleave([
+            playlists_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist))),
+            albums_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist)))
+        ]);
+        super(results, playlists_response.next_href !== undefined || albums_response.next_href !== undefined);
+        this.playlists_next_href = playlists_response.next_href;
+        this.albums_next_href = albums_response.next_href;
+    }
+    nextPage() {
+        if (this.playlists_next_href !== undefined && this.albums_next_href !== undefined) {
+            const responses = local_http
+                .batch()
+                .GET(this.playlists_next_href, {}, false)
+                .GET(this.albums_next_href, {}, false)
+                .execute();
+            if (responses[0] === undefined || responses[1] === undefined) {
+                throw new ScriptException("unreachable");
+            }
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            const playlists_response = JSON.parse(responses[0].body);
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            const albums_response = JSON.parse(responses[1].body);
+            this.results = interleave([
+                playlists_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist))),
+                albums_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist)))
+            ]);
+            this.hasMore = playlists_response.next_href !== undefined || albums_response.next_href !== undefined;
+            this.playlists_next_href = playlists_response.next_href;
+            this.albums_next_href = albums_response.next_href;
+        }
+        else if (this.playlists_next_href !== undefined) {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            const playlists_response = JSON.parse(local_http.GET(this.playlists_next_href, {}, false).body);
+            this.results = playlists_response.collection.map(playlist => new PlatformPlaylist(sound_cloud_playlist_to_platform_playlist_def(playlist)));
+            this.hasMore = playlists_response.next_href !== undefined;
+            this.playlists_next_href = playlists_response.next_href;
+        }
+        else if (this.albums_next_href !== undefined) {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            const albums_response = JSON.parse(local_http.GET(this.albums_next_href, {}, false).body);
+            this.results = albums_response.collection.map(sound_cloud_playlist_to_platform_playlist_def).map(playlist_def => new PlatformPlaylist(playlist_def));
+            this.hasMore = albums_response.next_href !== undefined;
+            this.albums_next_href = albums_response.next_href;
+        }
+        else {
+            throw new ScriptException("unreachable");
+        }
+        return this;
+    }
+    hasMorePagers() {
+        return this.hasMore;
+    }
+}
+function search_albums(query, limit, offset) {
+    const url = search_albums_url(query, limit, offset);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const search_response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
+    return search_response;
+}
+function search_albums_url(query, limit, offset) {
+    const url = new URL(`${API_URL}search/albums`);
+    url.searchParams.set("q", query);
+    url.searchParams.set("client_id", local_state.client_id);
+    url.searchParams.set("limit", limit.toString());
+    url.searchParams.set("offset", offset.toString());
+    url.searchParams.set("linked_partitioning", (1).toString());
+    url.searchParams.set("app_version", local_state.app_version.toString());
+    url.searchParams.set("app_locale", APP_LOCALE);
+    return url;
+}
+function search_playlists(query, limit, offset) {
+    const url = search_playlists_url(query, limit, offset);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const search_response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
+    return search_response;
+}
+function search_playlists_url(query, limit, offset) {
+    const url = new URL(`${API_URL}search/playlists_without_albums`);
+    url.searchParams.set("q", query);
+    url.searchParams.set("client_id", local_state.client_id);
+    url.searchParams.set("limit", limit.toString());
+    url.searchParams.set("offset", offset.toString());
+    url.searchParams.set("linked_partitioning", (1).toString());
+    url.searchParams.set("app_version", local_state.app_version.toString());
+    return url;
+}
+//#endregion
+//#region converters
+function sound_cloud_user_to_platform_channel(scu) {
+    const visuals = scu.visuals?.visuals;
+    const banner = visuals?.[0]?.visual_url ?? "";
     return new PlatformChannel({
-        id: new PlatformID(PLATFORM, scu.id.toString(), config.id, PLATFORM_CLAIMTYPE),
+        id: new PlatformID(PLATFORM, scu.id.toString(), plugin.config.id),
         name: scu.username,
         thumbnail: scu.avatar_url,
         banner,
         subscribers: scu.followers_count || 0,
         description: scu.description,
         url: scu.permalink_url,
-        links,
     });
 }
-
-/**
- * Convert a Soundcloud Track to a PlatformVideo
- * @param { import("./types").SoundcloudTrack } sct
- * @returns { PlatformVideo }
- */
-function soundcloudTrackToPlatformVideo(sct) {
+function sound_cloud_track_to_platform_video(sct) {
     return new PlatformVideo({
-        id: new PlatformID(PLATFORM, sct.id.toString(), config.id),
+        id: new PlatformID(PLATFORM, sct.id.toString(), plugin.config.id),
         name: sct.title,
-        thumbnails: new Thumbnails([new Thumbnail(sct.artwork_url !== null ? sct.artwork_url.replace('large', 't500x500') : sct.artwork_url, 0)]),
-        author: new PlatformAuthorLink(
-            new PlatformID(PLATFORM, sct.user_id.toString(), config.id, PLATFORM_CLAIMTYPE),
-            sct.user.username,
-            sct.user.permalink_url,
-            sct.user.avatar_url
-        ),
-        uploadDate: parseInt(new Date(sct.created_at).getTime() / 1000),
-        duration: parseInt(sct.duration / 1000),
+        thumbnails: new Thumbnails([new Thumbnail(sct.artwork_url ?? sct.user.avatar_url.replace("large", "t500x500"), HARDCODED_THUMBNAIL_QUALITY)]),
+        author: new PlatformAuthorLink(new PlatformID(PLATFORM, sct.user_id.toString(), plugin.config.id), sct.user.username, sct.user.permalink_url, sct.user.avatar_url),
+        datetime: date_to_unix_seconds(sct.created_at),
+        duration: Math.round(sct.duration / 1000),
         viewCount: sct.playback_count,
         url: sct.permalink_url,
         isLive: false,
-    })
-}
-
-/**
- * Replace the "m." prefix in a SoundCloud URL with an empty string.
- * 
- * @param {string} url - The SoundCloud URL to modify.
- * @returns {string} - The modified URL without the "m." prefix.
- */
-function removeMobilePrefix(url) {
-    return url.trim().replace("https://m.", "https://");
-}
-
-/**
- * Currently the trending pages has some duplicates, this function ensures that the array is unique based on the specified property.
- * Ensures that each item in the array is unique based on the specified property.
- * @param {Array} array - The array of objects to process.
- * @param {string} property - The property to use for uniqueness.
- * @returns {Array} - A new array with unique items based on the specified property.
- */
-function ensureUniqueByProperty(array, property) {
-    const seen = new Set();
-    return array.filter(item => {
-        if (item[property] && !seen.has(item[property])) {
-            seen.add(item[property]);
-            return true;
-        }
-        return false;
+        shareUrl: sct.permalink_url,
     });
 }
-
-
-function extractSoundCloudId(url) {
-    if (!url) return null;
-
-    const match = url.match(REGEX_CHANNEL);
-    if (match) {
-        return match[2]; // The second capturing group contains the SoundCloud ID
-    }
-
-    return null; // Return null if no match
-}
-
-function isSoundCloudChannelPlaylistUrl(url) {
-    return REGEX_CHANNEL_PLAYLISTS.test(url) || REGEX_SYSTEM_PLAYLISTS.test(url);
-}
-
-function isSoundCloudSystemPlaylist(url) {
-    return REGEX_SYSTEM_PLAYLISTS.test(url);
-}
-
-function standardPlaylistPager(url){
-    
-    const urlDetails = extractSoundCloudDetails(url);
-    
-    const channelSlug = urlDetails.userId;
-    const playlist = urlDetails.trackId;
-    
-    const channel = source.getChannel(`${URL_BASE}/${channelSlug}`);
-    
-    const info = systemPlaylistsMaps[playlist];
-
-    const apiPath = info?.apiPath ?? playlist;
-    const playlistTitle =  info?.playlistTitle ?? playlist;
-    const apiBasePath = info?.apiBasePath ?? 'https://api-v2.soundcloud.com/users';
-
-    let withNext = [
-        `${apiBasePath}/${channel.id.value}/${apiPath}?client_id=${CLIENT_ID}&limit=20&offset=0&linked_partitioning=1&app_version=${SOUNDCLOUD_APP_VERSION}&app_locale=en`
-    ]
-    
-    class ChannelPlaylistsPager extends VideoPager {
-        constructor({
-            results,
-            hasMore,
-            context,
-          }) {
-            
-            super(results, hasMore, context);
-          }
-
-          nextPage() {
-              
-            let withNext = this.context.withNext ?? [];
-            let seen = this.context.seen ?? [];
-            
-            let all = this.results ?? [];
-
-            let batch = http.batch();
-            
-            withNext.forEach(url => {
-                batch.GET(url, {});
-            });
-
-            const responses = batch.execute();
-        
-            withNext = [];
-            
-            for(var ct = 0; ct < responses.length; ct++) {
-                const res = responses[ct];
-                
-                if(res.isOk) {
-                    
-                    const body = JSON.parse(res.body);
-                     
-                    if(body.next_href) {
-                        withNext.push(`${body.next_href}&client_id=${CLIENT_ID}`);
-                    }
-        
-                    const currentCollection = body.collection.filter(c => c.track || c.kind === 'track').map(c => soundcloudTrackToPlatformVideo(c.track ?? c));
-                       
-                    all = [...all, ...currentCollection].filter(a => seen.indexOf(a.id.value) === -1);
-
-                    seen = [...seen, ...all.map(a => a.id.value)];
-                    
-                }
-                
+function sound_cloud_playlist_to_platform_playlist_def(scp) {
+    const datetime = (() => {
+        if (scp.kind === "playlist") {
+            return date_to_unix_seconds(scp.display_date);
+        }
+        else {
+            if (scp.last_updated === null) {
+                return undefined;
             }
-        
-            const hasMore = !!withNext.length;
-            
-            return new ChannelPlaylistsPager({results: all, hasMore, context: { withNext, seen }});
-          }
-    }
-
-    const author =  new PlatformAuthorLink(
-        new PlatformID(PLATFORM,channel.id.value.toString(),config.id,PLATFORM_CLAIMTYPE),
-        channel.name,
-        channel.url,
-        channel.thumbnail,
-    );
-    
-    let contentPager = new ChannelPlaylistsPager({ context: { withNext } }).nextPage();
-        
-    return new PlatformPlaylistDetails({
-        url: url,
-        id: new PlatformID(PLATFORM, '', config.id),
-        author: author,
-        name: playlistTitle,
-        // thumbnail: "",
-        videoCount: -1,
-        contents: contentPager
-    });
-}
-
-function extractSoundCloudDetails(url) {
-    if (!url) return null;
-
-    const match = url.match(/^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)\/?$/);
-    if (match) {
-        return {
-            userId: match[2], // Extracted user/artist name
-            trackId: match[3] // Extracted track identifier
-        };
-    }
-
-    return null; // Return null if the URL doesn't match the expected pattern
-}
-
-function dateToUnixSeconds(date) {
-    if (!date) {
-      return 0;
-    }
-    
-    return Math.round(Date.parse(date) / 1000);
-}
-
-
-/**
- * Filters out premium content based on user settings
- * @param {Array} results - The mapped results
- * @returns {Array} - The filtered results
- */
-function filterPremiumContent(results) {
-        // If hiding premium content is not enabled, return all results as-is
-        if (!_settings.hidePremiumContent) {
-            return results;
+            else {
+                return date_to_unix_seconds(scp.last_updated);
+            }
         }
-    
-        // Filter out premium content with "SUB_HIGH_TIER" monetization model
-        return results.filter(item => item.monetization_model !== "SUB_HIGH_TIER");
-}
-
-function resolveTrack(url) {
-    const match = url.match(/soundcloud\.com\/[^\/]+\/([^\/\?]+)/);
-    if (match && match[1]) {
-        // Get actual numeric track ID from the permalink
-        const resp = callUrl(`${API_URL}resolve?url=${encodeURIComponent(url)}&client_id=${CLIENT_ID}${URL_ADDITIVE}`);
-   
-        if (resp.isOk) {
-            const trackData = JSON.parse(resp.body);          
-            return trackData;
-        }
+    })();
+    const def = {
+        id: new PlatformID(PLATFORM, scp.id.toString(), plugin.config.id),
+        author: new PlatformAuthorLink(new PlatformID(PLATFORM, scp.user.id.toString(), plugin.config.id), scp.user.username, scp.user.permalink_url, scp.user.avatar_url, scp.user.followers_count),
+        name: scp.title,
+        thumbnail: scp.artwork_url,
+        videoCount: scp.kind === "playlist" ? scp.track_count : scp.tracks.length,
+        url: scp.permalink_url,
+    };
+    if (datetime === undefined) {
+        return def;
     }
-    return null;
-}
-
-// Helper function to extract track ID from URL
-function extractTrackId(url) {
-    return resolveTrack(url)?.id;
-}
-
-// Pager for related tracks
-class RelatedTracksPager extends VideoPager {
-    constructor({ videos, hasMore, nextUrl }) {
-        super(videos, hasMore);
-        this.nextUrl = nextUrl;
+    else {
+        return { datetime, ...def };
     }
-
+}
+function sound_cloud_playlist_to_platform_playlist_details_def(scp) {
+    return {
+        ...sound_cloud_playlist_to_platform_playlist_def(scp),
+        contents: new PlaylistContentsPager(scp.tracks, 14)
+    };
+}
+class PlaylistContentsPager extends VideoPager {
+    tracks;
+    page_size;
+    constructor(tracks, page_size) {
+        const tracks_to_load = tracks.splice(0, page_size);
+        const url = new URL(`${API_URL}tracks`);
+        url.searchParams.set("ids", tracks_to_load.map(track => track.id).join(","));
+        url.searchParams.set("client_id", local_state.client_id);
+        url.searchParams.set("app_version", local_state.app_version.toString());
+        url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(url.toString(), {}, false).body);
+        super(tracks_to_load
+            .map(track_min => response.find(track => track_min.id === track.id))
+            .filter(track => track !== undefined)
+            .map(sound_cloud_track_to_platform_video), tracks.length > 0);
+        this.tracks = tracks;
+        this.page_size = page_size;
+    }
     nextPage() {
-        if (!this.nextUrl) {
-            this.hasMore = false;
-            return this;
-        }
-
-        // Add client_id to nextUrl if not present
-        const url = this.nextUrl.includes('client_id=') ? 
-            this.nextUrl : 
-            `${this.nextUrl}${this.nextUrl.includes('?') ? '&' : '?'}client_id=${CLIENT_ID}${URL_ADDITIVE}`;
-
-        const resp = callUrl(url);
-        
-        if (!resp.isOk) {
-            this.hasMore = false;
-            return this;
-        }
-
-        const json = JSON.parse(resp.body);
-        
-        this.results = (json.collection || []).map(track => soundcloudTrackToPlatformVideo(track));
-        this.hasMore = !!json.next_href;
-        this.nextUrl = json.next_href;
-        
+        const tracks_to_load = this.tracks.splice(0, this.page_size);
+        const url = new URL(`${API_URL}tracks`);
+        url.searchParams.set("ids", tracks_to_load.map(track => track.id).join(","));
+        url.searchParams.set("client_id", local_state.client_id);
+        url.searchParams.set("app_version", local_state.app_version.toString());
+        url.searchParams.set("app_locale", APP_LOCALE);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const response = JSON.parse(local_http.GET(url.toString(), {}, false).body);
+        this.results = tracks_to_load
+            .map(track_min => response.find(track => track_min.id === track.id))
+            .filter(track => track !== undefined)
+            .map(sound_cloud_track_to_platform_video);
+        this.hasMore = this.tracks.length > 0;
         return this;
     }
+    hasMorePagers() {
+        return this.hasMore;
+    }
 }
-
-function extractCodec(inputString) {
-    const codecRegex = /codecs=["']([^"']*)["']/;
-    const match = inputString.match(codecRegex);
-    return match ? match[1] : null;
+//#endregion
+//#region utilities
+/**
+ *
+ * @param url SoundCloud channel url
+ * @returns
+ */
+function extract_sound_cloud_id(url) {
+    const match = url.match(REGEX_CHANNEL);
+    if (match?.[2]) {
+        return match[2]; // The second capturing group contains the SoundCloud ID
+    }
+    throw new ScriptException(`failed to extract SoundCloud slug from url: ${url}`);
 }
-
-console.log('LOADED')
+function is_sound_cloud_playlist_url(url) {
+    return REGEX_CHANNEL_PLAYLIST.test(url) || is_sound_cloud_likes_playlist(url);
+}
+function is_sound_cloud_likes_playlist(url) {
+    return REGEX_LIKES_PLAYLIST.test(url);
+}
+function date_to_unix_seconds(date) {
+    return Math.round(Date.parse(date) / 1000);
+}
+function is_premium(track) {
+    return track.monetization_model === "SUB_HIGH_TIER";
+}
+function resolve_track(url) {
+    const request_url = new URL(`${API_URL}resolve`);
+    request_url.searchParams.set("url", url);
+    request_url.searchParams.set("client_id", local_state.client_id);
+    request_url.searchParams.set("app_version", local_state.app_version.toString());
+    request_url.searchParams.set("app_locale", APP_LOCALE);
+    // Get actual numeric track ID from the permalink
+    const resp = local_http.GET(request_url.toString(), {}, false);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const track_data = JSON.parse(resp.body);
+    return track_data;
+}
+function extract_track_id(url) {
+    return resolve_track(url).id;
+}
+function extract_container_and_codec(mime_type) {
+    const codecRegex = /^(.*?)(|; codecs="(.*?)")$/;
+    const match = mime_type.match(codecRegex);
+    if (match?.[1] === undefined || match[2] === undefined) {
+        throw new ScriptException(`unable to determine container and codec for ${mime_type}`);
+    }
+    return { container: match[1], codec: match[2] };
+}
+function interleave(arrays) {
+    const maxLength = Math.max(...arrays.map(arr => arr.length));
+    const result = [];
+    for (let i = 0; i < maxLength; i++) {
+        arrays.forEach((array) => {
+            if (i < array.length) {
+                const val = array[i];
+                if (val === undefined) {
+                    throw new ScriptException("unreachable");
+                }
+                result.push(val);
+            }
+        });
+    }
+    return result;
+}
+function assert_exhaustive(value, exception_message) {
+    log(["SoundCloud log:", value]);
+    if (exception_message !== undefined) {
+        return new ScriptException(exception_message);
+    }
+    return;
+}
+function passthrough_log(object) {
+    log(object);
+    return object;
+}
+//#endregion
+console.log(extract_track_id, passthrough_log, search_playlists, search_albums);
+// export statements are removed during build step
+// used for unit testing in SpotifyScript.test.ts
+// export { extract_track_id };
+//# sourceMappingURL=script.js.map
