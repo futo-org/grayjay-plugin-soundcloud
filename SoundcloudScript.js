@@ -420,8 +420,10 @@ class TrackSearchPager extends VideoPager {
         if (this.next_href === undefined) {
             throw new ScriptException("unreachable");
         }
+        const url = new URL(this.next_href);
+        url.searchParams.set("client_id", local_state.client_id);
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const search_response = JSON.parse(local_http.GET(this.next_href, {}, true).body);
+        const search_response = JSON.parse(passthrough_log(local_http.GET(url.toString(), {}, true)).body);
         this.results = search_response.collection.filter(filter_tracks).map((user) => sound_cloud_track_to_platform_video(user));
         this.hasMore = search_response.next_href !== undefined;
         this.next_href = search_response.next_href;
