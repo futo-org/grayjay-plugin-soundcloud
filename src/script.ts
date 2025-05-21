@@ -555,7 +555,7 @@ class TrackSearchPager extends VideoPager {
         url.searchParams.set("client_id", local_state.client_id)
 
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const search_response: SearchTracksResponse = JSON.parse(passthrough_log(local_http.GET(url.toString(), {}, true)).body)
+        const search_response: SearchTracksResponse = JSON.parse(local_http.GET(url.toString(), {}, true).body)
 
         this.results = search_response.collection.filter(filter_tracks).map((user) => sound_cloud_track_to_platform_video(user))
         this.hasMore = search_response.next_href !== undefined
