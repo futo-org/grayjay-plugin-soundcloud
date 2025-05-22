@@ -149,6 +149,10 @@ function enable(conf: SourceConfig, settings: Settings, saved_state?: string | n
 
         const is_premium = (() => {
             if (bridge.isLoggedIn()) {
+                if (!responses[1].isOk) {
+                    bridge.toast("login expired. trying logging in again. and report this error on Github")
+                    return false
+                }
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
                 const me_response: {
                     readonly consumer_subscription: {

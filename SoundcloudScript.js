@@ -87,6 +87,10 @@ function enable(conf, settings, saved_state) {
         }
         const is_premium = (() => {
             if (bridge.isLoggedIn()) {
+                if (!responses[1].isOk) {
+                    bridge.toast("login expired. trying logging in again. and report this error on Github");
+                    return false;
+                }
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
                 const me_response = JSON.parse(responses[1].body);
                 return me_response.consumer_subscription.product.id === "consumer-high-tier";
