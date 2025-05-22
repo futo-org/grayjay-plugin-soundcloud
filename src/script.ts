@@ -901,6 +901,10 @@ function getContentDetails(url: string): PlatformContentDetails {
         }
     })()
 
+    if (selected_transcoding.snipped) {
+        bridge.toast("Playing snippet of SoundCloud Go+ track")
+    }
+
     const media_url = new URL(selected_transcoding.url)
     media_url.searchParams.append('client_id', local_state.client_id)
     media_url.searchParams.append('track_authorization', sct.track_authorization)
