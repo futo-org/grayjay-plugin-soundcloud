@@ -17,5 +17,3 @@ await Promise.allSettled([describe("script module integration", { skip: false },
         assert.strictEqual("11", (11).toString())
     })
 })])
-
-
