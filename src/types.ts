@@ -102,6 +102,11 @@ export type SearchTypes = typeof Type.Feed.Videos | typeof Type.Feed.Mixed
 //#endregion
 
 //#region JSON types
+export type LinksResponse = {
+    readonly title: string
+    readonly url: string
+}[]
+
 export type LikesResponse = PaginationResponse<{
     readonly track: SoundCloudTrack
 } | {

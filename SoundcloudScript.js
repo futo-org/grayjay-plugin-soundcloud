@@ -2,7 +2,7 @@
 const API_URL = "https://api-v2.soundcloud.com/";
 const APP_LOCALE = "en";
 const PLATFORM = "SoundCloud";
-const USER_AGENT_DESKTOP = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
+const USER_AGENT_DESKTOP = "Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0";
 const USER_AGENT_MOBILE = "Mozilla/5.0 (Linux; Android 10; Pixel 6a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 const URL_BASE = "https://soundcloud.com";
 const REGEX_CHANNEL_PLAYLIST = /^https?:\/\/(www\.|m\.)?soundcloud\.com\/([a-zA-Z0-9_-]+)\/sets\/[a-zA-Z0-9:/_-]+(\?[^#]*)?$/;
@@ -443,7 +443,7 @@ class SoundCloudChannelPager extends ChannelPager {
     next_href;
     constructor(query, limit, offset) {
         const response = search_channels(query, limit, offset);
-        const results = response.collection.map((user) => sound_cloud_user_to_platform_channel(user));
+        const results = response.collection.map((user) => new PlatformChannel(sound_cloud_user_to_platform_channel_def(user)));
         super(results, response.next_href !== undefined);
         this.next_href = response.next_href;
     }
@@ -455,7 +455,7 @@ class SoundCloudChannelPager extends ChannelPager {
         url.searchParams.set("client_id", local_state.client_id);
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const search_response = JSON.parse(local_http.GET(url.toString(), {}, true).body);
-        this.results = search_response.collection.map((user) => sound_cloud_user_to_platform_channel(user));
+        this.results = search_response.collection.map((user) => new PlatformChannel(sound_cloud_user_to_platform_channel_def(user)));
         this.hasMore = search_response.next_href !== undefined;
         this.next_href = search_response.next_href;
         return this;
@@ -495,8 +495,20 @@ function getChannel(url) {
     if (user_hydration === undefined) {
         throw new ScriptException('Could not find channel info');
     }
-    const platform_channel = sound_cloud_user_to_platform_channel(user_hydration.data);
-    return platform_channel;
+    const platform_channel_def = sound_cloud_user_to_platform_channel_def(user_hydration.data);
+    return new PlatformChannel({
+        ...platform_channel_def,
+        links: get_channel_links(user_hydration.data.id)
+    });
+}
+function get_channel_links(user_id) {
+    const url = new URL(`${API_URL}users/soundcloud:users:${user_id.toString()}/web-profiles`);
+    url.searchParams.set("client_id", local_state.client_id);
+    url.searchParams.set("app_version", local_state.app_version.toString());
+    url.searchParams.set("app_locale", APP_LOCALE);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const links_response = JSON.parse(local_http.GET(url.toString(), {}, false).body);
+    return Object.fromEntries(links_response.map(link_data => [link_data.title !== "" ? link_data.title : link_data.url, link_data.url]));
 }
 function getChannelContents(url) {
     return new ChannelVideoPager(url, 20, 0);
@@ -1153,10 +1165,10 @@ function search_playlists_url(query, limit, offset) {
 }
 //#endregion
 //#region converters
-function sound_cloud_user_to_platform_channel(scu) {
+function sound_cloud_user_to_platform_channel_def(scu) {
     const visuals = scu.visuals?.visuals;
     const banner = visuals?.[0]?.visual_url ?? "";
-    return new PlatformChannel({
+    return {
         id: new PlatformID(PLATFORM, scu.id.toString(), plugin.config.id),
         name: scu.username,
         thumbnail: scu.avatar_url,
@@ -1164,7 +1176,7 @@ function sound_cloud_user_to_platform_channel(scu) {
         subscribers: scu.followers_count || 0,
         description: scu.description,
         url: scu.permalink_url,
-    });
+    };
 }
 function sound_cloud_track_to_platform_video(sct) {
     return new PlatformVideo({

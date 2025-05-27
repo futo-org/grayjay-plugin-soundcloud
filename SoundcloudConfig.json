@@ -8,7 +8,7 @@
   "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
   "repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/soundcloud",
   "scriptUrl": "./SoundcloudScript.js",
-  "version": 21,
+  "version": 22,
   "iconUrl": "./soundcloud.png",
   "id": "5fb74e28-2fba-406a-9418-38af04f63c08",
   "scriptSignature": "",
@@ -25,7 +25,7 @@
     "on.soundcloud.com"
   ],
   "authentication": {
-    "loginUrl": "https://m.soundcloud.com/discover",
+    "loginUrl": "https://soundcloud.com/you/library",
     "domainHeadersToFind": {
       ".soundcloud.com": [
         "Authorization"
@@ -34,7 +34,7 @@
     "cookiesToFind": [
       "oauth_token"
     ],
-    "userAgent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36"
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0"
   },
   "settings": [
     {
@@ -69,6 +69,9 @@
     }
   ],
   "changelog": {
+    "22": [
+      "Prevent login expiration and add profile links"
+    ],
     "21": [
       "Add login support, SoundCloud Go+ support, playlist search, and track search filtering"
     ]
