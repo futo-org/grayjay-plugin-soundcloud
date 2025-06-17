@@ -762,12 +762,12 @@ function getContentDetails(url) {
         datetime: date_to_unix_seconds(sct.display_date),
         url: sct.permalink_url,
         duration: Math.round(sct.duration / 1000),
-        viewCount: sct.playback_count,
+        viewCount: sct.playback_count ?? 0,
         isLive: false,
         shareUrl: sct.permalink_url,
-        description: sct.description,
+        description: sct.description ?? "",
         video: new UnMuxVideoSourceDescriptor([], [source]),
-        rating: new RatingLikes(sct.likes_count),
+        rating: new RatingLikes(sct?.likes_count ?? 0),
         getContentRecommendations: () => {
             return getContentRecommendations(sct.permalink_url);
         }
