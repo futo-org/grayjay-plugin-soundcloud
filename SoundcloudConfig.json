@@ -1,4 +1,5 @@
 {
+  "$schema": "https://github.com/MithrilGoat/GrayJay-Plugin-Schema/releases/latest/download/Schema.json",
   "name": "SoundCloud",
   "description": "One of the biggest music distribution platforms, Privately owned",
   "author": "FUTO",
@@ -7,7 +8,7 @@
   "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
   "repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/soundcloud",
   "scriptUrl": "./SoundcloudScript.js",
-  "version": 20,
+  "version": 23,
   "iconUrl": "./soundcloud.png",
   "id": "5fb74e28-2fba-406a-9418-38af04f63c08",
   "scriptSignature": "",
@@ -23,28 +24,56 @@
     "m.soundcloud.com",
     "on.soundcloud.com"
   ],
-  "supportedClaimTypes": [
-    17
-  ],
+  "authentication": {
+    "loginUrl": "https://soundcloud.com/you/library",
+    "domainHeadersToFind": {
+      ".soundcloud.com": [
+        "Authorization"
+      ]
+    },
+    "cookiesToFind": [
+      "oauth_token"
+    ],
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0"
+  },
   "settings": [
     {
-      "variable": "hidePremiumContent",
+      "variable": "hide_premium_content",
       "name": "Hide premium content",
-      "description": "Hides premium content you do not have access",
+      "description": "Hides premium content for non premium users instead of providing the 30 second snippet",
       "type": "Boolean",
       "default": "true"
+    },
+    {
+      "variable": "preferred_protocol",
+      "name": "Preferred protocol",
+      "description": "Indicates the streaming protocol to use if available",
+      "type": "Dropdown",
+      "default": "0",
+      "options": [
+        "Progressive",
+        "HLS"
+      ]
+    },
+    {
+      "variable": "home_preference",
+      "name": "Logged in home page",
+      "description": "Pick the content to display one the Grayjay home page when logged into SoundCloud",
+      "type": "Dropdown",
+      "default": "0",
+      "options": [
+        "Discover",
+        "Feed",
+        "Charts"
+      ]
     }
   ],
   "changelog": {
-    "18": [
-      "Add setting to hide premium content from search results;",
-      "Fix no audio on some SoundCloud tracks;"
+    "22": [
+      "Prevent login expiration and add profile links"
     ],
-    "20": [
-      "Feature: Add support for private tracks;",
-      "Feature: Add content recommendation support;",
-      "Feature: Adding support for more audio stream types and option to switch between them;",
-      "Fix: Filtering out problematic Opus codec streams that caused playback issues;"
+    "21": [
+      "Add login support, SoundCloud Go+ support, playlist search, and track search filtering"
     ]
   }
 }

@@ -1,0 +1,48 @@
+{
+    "name": "grayjay-soundcloud-plugin",
+    "version": "1.0.0",
+    "description": "listen to all the music",
+    "homepage": "https://gitlab.futo.org/videostreaming/plugins/soundcloud",
+    "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "git+https://gitlab.futo.org/videostreaming/plugins/soundcloud.git"
+    },
+    "keywords": [
+        "soundcloud",
+        "grayjay"
+    ],
+    "author": "Kai DeLorenzo",
+    "license": "MPL-2.0",
+    "bugs": {
+        "url": "https://gitlab.futo.org/videostreaming/plugins/soundcloud/issues"
+    },
+    "dependencies": {},
+    "devDependencies": {
+        "@types/node": "^22.15.21",
+        "@eslint/js": "^9.27.0",
+        "eslint": "^9.27.0",
+        "typescript": "^5.8.3",
+        "typescript-eslint": "^8.32.1",
+        "@kaidelorenzo/grayjay-polyfill": "gitlab:kaidelorenzo/grayjay-polyfill#ed272f793e402d6fbdc95859cf777c188379b56f",
+        "@types/grayjay-source": "gitlab:kaidelorenzo/grayjay-plugin-types#9dcec6910917e3ddc5a663f20be84bd97dc1fe9a"
+    },
+    "scripts": {
+        "test": "node --no-experimental-strip-types --test",
+        "debug-build:node": "node _dist/src/utilities/build.js \"http://localhost:8080\"",
+        "debug-build:bun": "bun run _dist/src/utilities/build.js \"http://localhost:8080\"",
+        "debug-build:deno": "deno run --allow-read --allow-write --allow-env --allow-run _dist/src/utilities/build.js \"http://localhost:8080\"",
+        "build:node": "node _dist/src/utilities/build.js",
+        "build:bun": "bun run _dist/src/utilities/build.js",
+        "build:deno": "deno run --allow-read --allow-write --allow-env --allow-run _dist/src/utilities/build.js",
+        "dev:node": "node _dist/src/utilities/dev.js",
+        "dev:bun": "bun run _dist/src/utilities/dev.js",
+        "dev:deno": "deno run --allow-read --allow-env --allow-run _dist/src/utilities/dev.js",
+        "lint:node": "npx eslint .",
+        "lint:bun": "bunx eslint .",
+        "lint:deno": "deno lint",
+        "release:node": "node _dist/src/utilities/release.js",
+        "release:bun": "bun run _dist/src/utilities/release.js",
+        "release:deno": "deno run --allow-read --allow-env --allow-run _dist/src/utilities/release.js"
+    }
+}
