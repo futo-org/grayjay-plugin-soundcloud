@@ -454,7 +454,11 @@ function search(query: string, _type: SearchTypes | null, order: Order | null, f
         throw new ScriptException("unreachable")
     }
     if (filters === null) {
-        throw new ScriptException("TODO")
+        return new TrackSearchPager(query, 20, 0, {
+            date: undefined,
+            duration: undefined,
+            license: undefined,
+        });
     }
     const sc_filters: SoundCloudFilters = {
         date: (() => {
@@ -970,12 +974,12 @@ function getContentDetails(url: string): PlatformContentDetails {
         datetime: date_to_unix_seconds(sct.display_date),
         url: sct.permalink_url,
         duration: Math.round(sct.duration / 1000),
-        viewCount: sct.playback_count ?? 0,
+        viewCount: sct.playback_count,
         isLive: false,
         shareUrl: sct.permalink_url,
-        description: sct.description ?? "",
+        description: sct.description,
         video: new UnMuxVideoSourceDescriptor([], [source]),
-        rating: new RatingLikes(sct?.likes_count ?? 0),
+        rating: new RatingLikes(sct.likes_count),
         getContentRecommendations: () => {
             return getContentRecommendations(sct.permalink_url)
         }
@@ -1010,7 +1014,7 @@ class RelatedTracksPager extends VideoPager {
         }
 
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const response: RelatedTracksResponse = JSON.parse(local_http.GET(this.next_href.toString(), {}, false).body)
+        const response: RelatedTracksResponse = JSON.parse(local_http.GET(this.next_href, {}, false).body)
 
         this.results = response.collection.map(track => sound_cloud_track_to_platform_video(track))
         this.hasMore = response.next_href !== null
