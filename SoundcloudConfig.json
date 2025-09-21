@@ -8,7 +8,7 @@
   "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
   "repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/soundcloud",
   "scriptUrl": "./SoundcloudScript.js",
-  "version": 24,
+  "version": 25,
   "iconUrl": "./soundcloud.png",
   "id": "5fb74e28-2fba-406a-9418-38af04f63c08",
   "scriptSignature": "",
@@ -69,6 +69,9 @@
     }
   ],
   "changelog": {
+    "25": [
+      "Fix playing some tracks"
+    ],
     "24": [
       "Fixed TODO in search without any filter on GrayJay desktop"
     ],

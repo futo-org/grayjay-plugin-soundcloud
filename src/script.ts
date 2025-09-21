@@ -453,6 +453,11 @@ function search(query: string, _type: SearchTypes | null, order: Order | null, f
     if (order !== null) {
         throw new ScriptException("unreachable")
     }
+
+    if(query && isContentDetailsUrl(query)) {
+        return new VideoPager([getContentDetails(query)as any], false);
+    }
+
     if (filters === null) {
         return new TrackSearchPager(query, 20, 0, {
             date: undefined,
@@ -895,7 +900,7 @@ function getContentDetails(url: string): PlatformContentDetails {
     const standard_progressive = filtered_transcodings.find(transcoding => transcoding.quality === "sq" && transcoding.format.protocol === "progressive")
     const standard_hls = filtered_transcodings.find(transcoding => transcoding.quality === "sq" && transcoding.format.protocol === "hls")
 
-    const selected_transcoding = (() => {
+    let selected_transcoding = (() => {
         switch (local_settings.preferred_protocol) {
             case Protocol.Progressive:
                 if (high_progressive !== undefined) {
@@ -931,9 +936,48 @@ function getContentDetails(url: string): PlatformContentDetails {
     const media_url = new URL(selected_transcoding.url)
     media_url.searchParams.append('client_id', local_state.client_id)
     media_url.searchParams.append('track_authorization', sct.track_authorization)
-
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const response: { url: string } = JSON.parse(local_http.GET(media_url.toString(), {}, true).body)
+
+    let response;
+
+    const mediaResponse = local_http.GET(media_url.toString(), {}, true);
+
+    // media response failed
+    if(!mediaResponse.isOk) {
+        log('Unable to get media url, falling back');
+
+        const batch = local_http.batch();
+
+        filtered_transcodings.forEach(transcoding => {
+            const media_url = new URL(transcoding.url);
+            media_url.searchParams.append('client_id', local_state.client_id);
+            media_url.searchParams.append('track_authorization', sct.track_authorization);
+            batch.GET(media_url.toString(), {}, true);
+        });
+
+        const responses = batch.execute();
+
+        const index = responses.findIndex(e => e.isOk);
+
+        if(index === -1) {
+            throw new UnavailableException("unable to find media source");
+        }
+
+        const fallback_transcoding = filtered_transcodings[index];
+        if (fallback_transcoding === undefined) {
+            throw new ScriptException("unable to find transcoding at index");
+        }
+        selected_transcoding = fallback_transcoding;
+
+        const response_body = responses[index]?.body;
+        if (response_body === undefined) {
+            throw new ScriptException("unable to get response body");
+        }
+        response = JSON.parse(response_body);
+        
+    } else {
+        response = JSON.parse(mediaResponse.body);
+    }
 
     const source = (() => {
         switch (selected_transcoding.format.protocol) {
