@@ -799,12 +799,12 @@ function getContentDetails(url) {
         datetime: date_to_unix_seconds(sct.display_date),
         url: sct.permalink_url,
         duration: Math.round(sct.duration / 1000),
-        viewCount: sct.playback_count ?? -1,
+        viewCount: sct.playback_count ?? -1, //https://github.com/futo-org/grayjay-android/issues/2338
         isLive: false,
         shareUrl: sct.permalink_url,
         description: sct.description ?? "",
         video: new UnMuxVideoSourceDescriptor([], [source]),
-        rating: new RatingLikes(sct?.likes_count ?? -1),
+        rating: new RatingLikes(sct?.likes_count ?? -1), //https://github.com/futo-org/grayjay-android/issues/2338
         getContentRecommendations: () => {
             return getContentRecommendations(sct.permalink_url);
         }
